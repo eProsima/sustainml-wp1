@@ -37,6 +37,10 @@ def task_callback(encoded_task, node_status, ml_model):
     # Callback implementation here
     for keyword in encoded_task.keywords():
         print("Received keyword " + keyword)
+    # include short delay for demos
+    time.sleep(2)
+    # populate output
+    ml_model.model("MODEL in ONXX format should be here")
 
 # Main workflow routine
 def run():

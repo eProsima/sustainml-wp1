@@ -36,6 +36,14 @@ def signal_handler(sig, frame):
 def task_callback(user_input, node_status, encoded_task):
     # Callback implementation here
     print (user_input.problem_description())
+    # include short delay for demos
+    time.sleep(2)
+    # populate output
+    encoded_task.keywords().append("User")
+    encoded_task.keywords().append("input")
+    encoded_task.keywords().append("detected")
+    encoded_task.keywords().append("keywords")
+    encoded_task.keywords().append("example")
 
 # Main workflow routine
 def run():
