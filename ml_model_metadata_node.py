@@ -11,9 +11,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""SustainML ML Model Provider Node Implementation."""
+"""SustainML Task Encoder Node Implementation."""
 
-from sustainml_py.nodes.MLModelNode import MLModelNode
+from sustainml_py.nodes.MLModelMetadataNode import MLModelMetadataNode
 
 # Manage signaling
 import signal
@@ -26,22 +26,25 @@ running = False
 # Signal handler
 def signal_handler(sig, frame):
     print("\nExiting")
-    MLModelNode.terminate()
+    MLModelMetadataNode.terminate()
     global running
     running = False
 
 # User Callback implementation
-# Inputs: ml_model_metadata, app_requirements, hw_constraints
-# Outputs: node_status, ml_model
-def task_callback(ml_model_metadata, app_requirements, hw_constraints, node_status, ml_model):
+# Inputs: user_input
+# Outputs: node_status, ml_model_metadata
+def task_callback(user_input, node_status, ml_model_metadata):
 
     # Callback implementation here
 
-    ml_model.model("MODEL in ONXX format")
+    ml_model_metadata.ml_model_metadata().append("New")
+    ml_model_metadata.ml_model_metadata().append("Model")
+    ml_model_metadata.ml_model_metadata().append("Metadata")
+    ml_model_metadata.ml_model_metadata().append("Properties")
 
 # Main workflow routine
 def run():
-    node = MLModelNode(callback=task_callback)
+    node = MLModelMetadataNode(callback=task_callback)
     global running
     running = True
     node.spin()
