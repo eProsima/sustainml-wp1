@@ -8,7 +8,7 @@ def get_mlgoals(graph_path):
     ml_goal_query = """
     PREFIX sc: <http://purl.org/science/owl/sciencecommons/>
     SELECT ?o
-    WHERE { ?s sc:mlgoal ?o } 
+    WHERE { ?s sc:mlgoal ?o }
     """
 
     qres = g.query(ml_goal_query)
@@ -26,7 +26,6 @@ def get_models(mlgoal, graph_path):
     ###########################################################
     ### get models with correwct machinelearning goal: ###
     ###########################################################
-    print(mlgoal)
     from rdflib import Graph
 
     # Load your RDF graph

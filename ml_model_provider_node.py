@@ -46,11 +46,13 @@ def task_callback(ml_model_metadata,
                   ml_model):
 
     # Callback implementation here
+
+    print (f"Received Task: {ml_model_metadata.task_id().problem_id()},{ml_model_metadata.task_id().iteration_id()}")
+
     if not ml_model_metadata.ml_model_metadata().empty():
 
         graph_path = 'CustomGraph.ttl'
         metadata = ml_model_metadata.ml_model_metadata()[0]
-        print (metadata)
 
         # Model selection and information retrieval
         suggested_models = get_models(metadata, graph_path)

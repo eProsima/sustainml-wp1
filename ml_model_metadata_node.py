@@ -36,7 +36,6 @@ def signal_handler(sig, frame):
 def get_llm_response(client, model_version, problem_definition, prompt):
     """Get a response from the Ollama API."""
     prompt = f"Given the following Information: \"{problem_definition}\". {prompt}"
-    print (prompt)
     try:
         response = client.chat(model=model_version, messages=[
             {
@@ -55,6 +54,8 @@ def get_llm_response(client, model_version, problem_definition, prompt):
 def task_callback(user_input, node_status, ml_model_metadata):
 
     # Callback implementation here
+
+    print (f"Received Task: {user_input.task_id().problem_id()},{user_input.task_id().iteration_id()}")
 
     client = Client(host='http://localhost:11434')
     graph_path = 'CustomGraph.ttl'
