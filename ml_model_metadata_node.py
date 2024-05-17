@@ -69,7 +69,7 @@ def task_callback(user_input, node_status, ml_model_metadata):
     prompt = f"Which of the following machine learning Goals can be used to solve this problem (or part of it): {goals}. Answer with only  one of the Machine learning goals and with nothing else"
     mlgoal = get_llm_response(client, "llama3", user_input.problem_definition(), prompt)
 
-    if mlgoal != None:
+    if mlgoal != None and mlgoal in mlgoals:
         ml_model_metadata.ml_model_metadata().append(mlgoal)
         print (f"Selected ML Goal: {mlgoal}")
     else:
