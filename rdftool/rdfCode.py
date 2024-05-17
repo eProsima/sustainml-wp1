@@ -1,6 +1,6 @@
 def get_mlgoals(graph_path):
     ###########################################################
-    ### get typs of machinlearning goals: ###
+    ### get types of machine learning goals:                ###
     ###########################################################
     import rdflib
     g = rdflib.Graph()
@@ -24,7 +24,7 @@ def get_mlgoals(graph_path):
 
 def get_models(mlgoal, graph_path):
     ###########################################################
-    ### get models with correwct machinelearning goal: ###
+    ### get models with correct machine learning goal:      ###
     ###########################################################
     from rdflib import Graph
 
@@ -63,7 +63,7 @@ def get_models(mlgoal, graph_path):
 
 def get_model_info(suggested_models, graph_path):
     ###########################################################
-    ### get info about model ###
+    ### get info about model                                ###
     ###########################################################
     import rdflib
     g = rdflib.Graph()

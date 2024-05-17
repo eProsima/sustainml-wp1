@@ -16,6 +16,7 @@
 from sustainml_py.nodes.MLModelMetadataNode import MLModelMetadataNode
 
 # Manage signaling
+import os
 import signal
 import threading
 import time
@@ -58,9 +59,9 @@ def task_callback(user_input, node_status, ml_model_metadata):
     print (f"Received Task: {user_input.task_id().problem_id()},{user_input.task_id().iteration_id()}")
 
     client = Client(host='http://localhost:11434')
-    graph_path = 'CustomGraph.ttl'
+    graph_path = os.path.dirname(__file__)+'/CustomGraph.ttl'
 
-    # Retereve Possible Ml Goals from graph
+    # Retrieve Possible Ml Goals from graph
     mlgoals = get_mlgoals(graph_path)
     goals = ', '.join(mlgoals)
 
@@ -68,7 +69,7 @@ def task_callback(user_input, node_status, ml_model_metadata):
     prompt = f"Which of the following machine learning Goals can be used to solve this problem (or part of it): {goals}. Answer with only  one of the Machine learning goals and with nothing else"
     mlgoal = get_llm_response(client, "llama3", user_input.problem_definition(), prompt)
 
-    if mlgoal != "":
+    if mlgoal != None:
         ml_model_metadata.ml_model_metadata().append(mlgoal)
         print (f"Selected ML Goal: {mlgoal}")
     else:

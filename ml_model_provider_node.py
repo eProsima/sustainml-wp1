@@ -16,6 +16,7 @@
 from sustainml_py.nodes.MLModelNode import MLModelNode
 
 # Manage signaling
+import os
 import signal
 import threading
 import time
@@ -51,7 +52,7 @@ def task_callback(ml_model_metadata,
 
     if not ml_model_metadata.ml_model_metadata().empty():
 
-        graph_path = 'CustomGraph.ttl'
+        graph_path = os.path.dirname(__file__)+'/CustomGraph.ttl'
         metadata = ml_model_metadata.ml_model_metadata()[0]
 
         # Model selection and information retrieval
