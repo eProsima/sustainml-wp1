@@ -16,9 +16,13 @@
 from sustainml_py.nodes.MLModelNode import MLModelNode
 
 # Manage signaling
+import os
 import signal
 import threading
 import time
+
+from rdftool.ModelONNXCodebase import model
+from rdftool.rdfCode import get_models, get_model_info
 
 # Whether to go on spinning or interrupt
 running = False
@@ -44,7 +48,26 @@ def task_callback(ml_model_metadata,
 
     # Callback implementation here
 
-    ml_model.model("MODEL in ONXX format")
+    print (f"Received Task: {ml_model_metadata.task_id().problem_id()},{ml_model_metadata.task_id().iteration_id()}")
+
+    if not ml_model_metadata.ml_model_metadata().empty():
+
+        graph_path = os.path.dirname(__file__)+'/CustomGraph.ttl'
+        metadata = ml_model_metadata.ml_model_metadata()[0]
+
+        # Model selection and information retrieval
+        suggested_models = get_models(metadata, graph_path)
+        model_info = get_model_info(suggested_models, graph_path)
+        model_names = list(model_info.keys())
+
+        # Random Model is selected here. In the Final code there should be some sort of selection to choose between Possible Models
+        chosen_model = model_names[0]
+
+        # Generate model code and keywords
+        onnx_path = model(chosen_model)
+        ml_model.model(onnx_path)
+    else:
+        raise Exception(f"Failed to determine ML goal for task {ml_model_metadata.task_id()}.")
 
 # Main workflow routine
 def run():

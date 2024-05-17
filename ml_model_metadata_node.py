@@ -16,9 +16,13 @@
 from sustainml_py.nodes.MLModelMetadataNode import MLModelMetadataNode
 
 # Manage signaling
+import os
 import signal
 import threading
 import time
+
+from rdftool.rdfCode import get_mlgoals
+from ollama import Client
 
 # Whether to go on spinning or interrupt
 running = False
@@ -30,6 +34,21 @@ def signal_handler(sig, frame):
     global running
     running = False
 
+def get_llm_response(client, model_version, problem_definition, prompt):
+    """Get a response from the Ollama API."""
+    prompt = f"Given the following Information: \"{problem_definition}\". {prompt}"
+    try:
+        response = client.chat(model=model_version, messages=[
+            {
+                'role': 'user',
+                'content': prompt,
+            },
+        ])
+        return response['message']['content']
+    except Exception as e:
+        print(f"Error in getting response from Ollama: {e}")
+        return None
+
 # User Callback implementation
 # Inputs: user_input
 # Outputs: node_status, ml_model_metadata
@@ -37,10 +56,24 @@ def task_callback(user_input, node_status, ml_model_metadata):
 
     # Callback implementation here
 
-    ml_model_metadata.ml_model_metadata().append("New")
-    ml_model_metadata.ml_model_metadata().append("Model")
-    ml_model_metadata.ml_model_metadata().append("Metadata")
-    ml_model_metadata.ml_model_metadata().append("Properties")
+    print (f"Received Task: {user_input.task_id().problem_id()},{user_input.task_id().iteration_id()}")
+
+    client = Client(host='http://localhost:11434')
+    graph_path = os.path.dirname(__file__)+'/CustomGraph.ttl'
+
+    # Retrieve Possible Ml Goals from graph
+    mlgoals = get_mlgoals(graph_path)
+    goals = ', '.join(mlgoals)
+
+    # Select MLGoal Using Ollama llama 3
+    prompt = f"Which of the following machine learning Goals can be used to solve this problem (or part of it): {goals}. Answer with only  one of the Machine learning goals and with nothing else"
+    mlgoal = get_llm_response(client, "llama3", user_input.problem_definition(), prompt)
+
+    if mlgoal != None and mlgoal in mlgoals:
+        ml_model_metadata.ml_model_metadata().append(mlgoal)
+        print (f"Selected ML Goal: {mlgoal}")
+    else:
+        raise Exception(f"Failed to determine ML goal for task {user_input.task_id()}.")
 
 # Main workflow routine
 def run():
