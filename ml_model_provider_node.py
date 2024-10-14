@@ -65,7 +65,8 @@ def task_callback(ml_model_metadata,
 
         # Generate model code and keywords
         onnx_path = model(chosen_model)
-        ml_model.model(onnx_path)
+        ml_model.model(chosen_model)
+        ml_model.model_path(onnx_path)
     else:
         raise Exception(f"Failed to determine ML goal for task {ml_model_metadata.task_id()}.")
 
