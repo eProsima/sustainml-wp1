@@ -20,8 +20,9 @@ import os
 import signal
 import threading
 import time
+import json
 
-from rdftool.rdfCode import get_mlgoals
+from rdftool.rdfCode import get_mlgoals, get_inputs
 from ollama import Client
 
 # Whether to go on spinning or interrupt
@@ -75,9 +76,48 @@ def task_callback(user_input, node_status, ml_model_metadata):
     else:
         raise Exception(f"Failed to determine ML goal for task {user_input.task_id()}.")
 
+# User Configuration Callback implementation
+# Inputs: req
+# Outputs: res
+def configuration_callback(req, res):
+
+    # Callback for configuration implementation here
+
+    if req.configuration() == "modality":
+        res.node_id(req.node_id())
+        res.transaction_id(req.transaction_id())
+
+        # Retrieve Possible Ml Goals from graph
+        graph_path = os.path.dirname(__file__)+'/CustomGraph.ttl'
+        inputs = get_inputs(graph_path)
+        ins = ', '.join(inputs)
+
+        if ins == "":
+            res.success(False)
+            res.err_code(1) # 0: No error || 1: Error
+        else:
+            res.success(True)
+            res.err_code(0) # 0: No error || 1: Error
+        print (f"Available Modalities: {ins}")
+        res.configuration(json.dumps(dict(modalities=ins)))
+
+    else:
+        # Dummy JSON configuration and implementation
+        dummy_config = {
+            "param1": "value1",
+            "param2": "value2",
+            "param3": "value3"
+        }
+        res.configuration(json.dumps(dummy_config))
+        res.node_id(req.node_id())
+        res.transaction_id(req.transaction_id())
+        res.success(True)
+        res.err_code(0) # 0: No error || 1: Error
+
+
 # Main workflow routine
 def run():
-    node = MLModelMetadataNode(callback=task_callback)
+    node = MLModelMetadataNode(callback=task_callback, service_callback=configuration_callback)
     global running
     running = True
     node.spin()

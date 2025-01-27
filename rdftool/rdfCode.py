@@ -21,6 +21,28 @@ def get_mlgoals(graph_path):
 
     return list(resSet)
 
+def get_inputs(graph_path):
+    ###########################################################
+    ### get types of machine learning inputs/modalities:    ###
+    ###########################################################
+    import rdflib
+    g = rdflib.Graph()
+    g.parse(graph_path)
+    input_query = """
+    PREFIX sc: <http://purl.org/science/owl/sciencecommons/>
+    SELECT ?o
+    WHERE { ?s sc:input ?o }
+    """
+
+    qres = g.query(input_query)
+    resSet = set()
+    for row in qres:
+        obj = None
+        if not row["o"] == None:
+            obj = row["o"].rsplit("/", 1)[1]
+        resSet.add(obj)
+
+    return list(resSet)
 
 def get_models(mlgoal, graph_path):
     ###########################################################
