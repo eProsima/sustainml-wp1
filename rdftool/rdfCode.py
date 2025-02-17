@@ -1,3 +1,6 @@
+from rdflib import Graph, Namespace, RDF, Literal
+from rdflib.namespace import XSD
+
 def get_mlgoals(graph_path):
     ###########################################################
     ### get types of machine learning goals:                ###
@@ -5,44 +8,34 @@ def get_mlgoals(graph_path):
     import rdflib
     g = rdflib.Graph()
     g.parse(graph_path)
-    ml_goal_query = """
-    PREFIX sc: <http://purl.org/science/owl/sciencecommons/>
-    SELECT ?o
-    WHERE { ?s sc:mlgoal ?o }
+    query = """
+    PREFIX conn: <http://example.org/conn/>
+    SELECT ?problem
+    WHERE {
+      ?problem a conn:Problem .
+    }
     """
+    results = g.query(query)
+    problems = [row[0] for row in results]
+    return problems
 
-    qres = g.query(ml_goal_query)
-    resSet = set()
-    for row in qres:
-        obj = None
-        if not row["o"] == None:
-            obj = row["o"].rsplit("/", 1)[1]
-        resSet.add(obj)
-
-    return list(resSet)
-
-def get_inputs(graph_path):
+def get_cover_tags(graph_path):
     ###########################################################
-    ### get types of machine learning inputs/modalities:    ###
+    ### get cover tags (modalities) of machine learning:    ###
     ###########################################################
     import rdflib
     g = rdflib.Graph()
     g.parse(graph_path)
-    input_query = """
-    PREFIX sc: <http://purl.org/science/owl/sciencecommons/>
-    SELECT ?o
-    WHERE { ?s sc:input ?o }
+    query = """
+    PREFIX conn: <http://example.org/conn/>
+    SELECT ?coverTag
+    WHERE {
+      ?coverTag a conn:CoverTag .
+    }
     """
-
-    qres = g.query(input_query)
-    resSet = set()
-    for row in qres:
-        obj = None
-        if not row["o"] == None:
-            obj = row["o"].rsplit("/", 1)[1]
-        resSet.add(obj)
-
-    return list(resSet)
+    results = g.query(query)
+    cover_tags = [row[0] for row in results]
+    return cover_tags
 
 def get_models(mlgoal, graph_path):
     ###########################################################
@@ -55,32 +48,24 @@ def get_models(mlgoal, graph_path):
     g.parse(graph_path, format="turtle")
 
     # Query to find all models
-    query = """
-    PREFIX sc: <http://purl.org/science/owl/sciencecommons/>
-    PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+    problem_literal = Literal(mlgoal, datatype=XSD.string)
 
-    SELECT DISTINCT ?model
+    query = """
+    PREFIX conn: <http://example.org/conn/>
+    PREFIX model: <http://example.org/model/>
+    SELECT ?model ?downloads
     WHERE {
-        {
-            ?model rdf:type sc:Model .
-            ?model sc:mlgoal """ + "sc:" + mlgoal + """
-            FILTER NOT EXISTS {
-                ?otherModel rdf:type ?model .
-            }
-        }
-        UNION
-        {
-            ?subModel rdf:type sc:Model .
-            ?model rdf:type ?subModel  .
-            ?model sc:mlgoal """ + "sc:" + mlgoal + """
-            FILTER NOT EXISTS {
-                ?otherSubclass rdf:type ?model  .
-            }
-        }
+      ?model a conn:Model .
+      ?model conn:hasProblem ?problem .
+      ?model conn:downloads ?downloads .
+      FILTER (?problem = ?problem_literal)
     }
+    ORDER BY DESC(?downloads)
     """
-    res = [row.model.rsplit("/", 1)[1] for row in g.query(query)]
-    return res
+
+    results = g.query(query, initBindings={'problem_literal': problem_literal})
+    models = [(str(row[0]), int(row[1])) for row in results]
+    return models
 
 
 def get_model_info(suggested_models, graph_path):
@@ -90,32 +75,44 @@ def get_model_info(suggested_models, graph_path):
     import rdflib
     g = rdflib.Graph()
     g.parse(graph_path)
-    model_info_dict = {}
-    for model in suggested_models:
-        query_m = """
-        PREFIX sc: <http://purl.org/science/owl/sciencecommons/>
-        SELECT ?s ?p ?o
-        WHERE { sc:%s ?p ?o}
-        """ % (model)
-        qres = g.query(query_m)
-        resDict = []
-        for row in qres:
-            obj = {}
-            for entry in ["p", "o"]:
-                if not row[entry] == None:
-                    obj[entry] = row[entry].rsplit("/", 1)[1]
-                else:
-                    obj[entry] = None
-            resDict.append(obj)
-        model_in = {}
-        for dicts in resDict:
-            key, value = dicts['p'], dicts['o']
-            if key in model_in:
-                if isinstance(model_in[key], list):
-                    model_in[key].append(value)
-                else:
-                    model_in[key] = [model_in[key], value]
-            else:
-                model_in[key] = value
-        model_info_dict[model] = model_in
-    return model_info_dict
+
+    model_infos = []
+
+    for model_name, _ in suggested_models:
+        model_literal = Literal(model_name, datatype=XSD.string)
+
+        query = """
+        PREFIX conn: <http://example.org/conn/>
+        PREFIX model: <http://example.org/model/>
+        PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+        SELECT ?model ?id ?name ?problem ?coverTag ?library ?downloads ?likes ?lastModified
+        WHERE {
+          ?model a conn:Model .
+          ?model conn:model_name ?name .
+          ?model conn:model_id ?id .
+          ?model conn:hasProblem ?problem .
+          ?model conn:hasCoverTag ?coverTag .
+          ?model conn:usesLibrary ?library .
+          ?model conn:downloads ?downloads .
+          ?model conn:likes ?likes .
+          ?model conn:lastModified ?lastModified .
+          FILTER (?name = ?model_literal)
+        }
+        """
+
+        results = g.query(query, initBindings={'model_literal': model_literal})
+        for row in results:
+            details = {
+                'model_uri': row[0],
+                'id': row[1],
+                'name': row[2],
+                'problem': row[3],
+                'coverTag': row[4],
+                'library': row[5],
+                'downloads': row[6],
+                'likes': row[7],
+                'lastModified': row[8]
+            }
+            model_infos.append(details)
+
+    return model_infos

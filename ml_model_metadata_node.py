@@ -22,7 +22,7 @@ import threading
 import time
 import json
 
-from rdftool.rdfCode import get_mlgoals, get_inputs
+from rdftool.rdfCode import get_mlgoals, get_cover_tags
 from ollama import Client
 
 # Whether to go on spinning or interrupt
@@ -43,7 +43,7 @@ def get_llm_response(client, model_version, problem_definition, prompt):
             {
                 'role': 'user',
                 'content': prompt,
-            },
+            }
         ])
         return response['message']['content']
     except Exception as e:
@@ -59,6 +59,17 @@ def task_callback(user_input, node_status, ml_model_metadata):
 
     print (f"Received Task: {user_input.task_id().problem_id()},{user_input.task_id().iteration_id()}")
 
+    extra_data_bytes = user_input.extra_data()
+    extra_data_str = ''.join(chr(b) for b in extra_data_bytes)
+    extra_data_dict = json.loads(extra_data_str) 
+
+    if "goal" in extra_data_dict and extra_data_dict["goal"] != "":
+        goal = extra_data_dict["goal"]
+        ml_model_metadata.ml_model_metadata().append(goal)
+        print(f"Skipped ML Model Metadata. ML Goal selected as input: {goal}")
+        return
+
+
     client = Client(host='http://localhost:11434')
     graph_path = os.path.dirname(__file__)+'/CustomGraph.ttl'
 
@@ -67,10 +78,20 @@ def task_callback(user_input, node_status, ml_model_metadata):
     goals = ', '.join(mlgoals)
 
     # Select MLGoal Using Ollama llama 3
-    prompt = f"Which of the following machine learning Goals can be used to solve this problem (or part of it): {goals}. Answer with only  one of the Machine learning goals and with nothing else"
-    mlgoal = get_llm_response(client, "llama3", user_input.problem_definition(), prompt)
+    prompt = f"Which of the following machine learning Goals can be used to solve this problem (or part of it): {goals}. Answer with only one of the Machine learning goals and with nothing else"
 
-    if mlgoal != None and mlgoal in mlgoals:
+    if(user_input.problem_definition() == ""):
+        problem = user_input.problem_short_description()
+    else:
+        problem = user_input.problem_definition()
+
+    if(user_input.modality() != ""):
+        problem = f"{problem} with modality {user_input.modality()}"
+
+    print (f"Problem: {problem}")   #Debugging
+    mlgoal = get_llm_response(client, "llama3", problem, prompt)
+
+    if mlgoal != None and mlgoal in goals:
         ml_model_metadata.ml_model_metadata().append(mlgoal)
         print (f"Selected ML Goal: {mlgoal}")
     else:
@@ -89,7 +110,7 @@ def configuration_callback(req, res):
 
         # Retrieve Possible Ml Goals from graph
         graph_path = os.path.dirname(__file__)+'/CustomGraph.ttl'
-        inputs = get_inputs(graph_path)
+        inputs = get_cover_tags(graph_path)
         ins = ', '.join(inputs)
 
         if ins == "":
@@ -98,8 +119,22 @@ def configuration_callback(req, res):
         else:
             res.success(True)
             res.err_code(0) # 0: No error || 1: Error
-        print (f"Available Modalities: {ins}")
-        res.configuration(json.dumps(dict(modalities=ins)))
+        sorted_modalities = ', '.join(sorted(inputs))
+        print(f"Available Modalities: {sorted_modalities}")
+
+        inputs = get_mlgoals(graph_path)
+        ins = ', '.join(inputs)
+
+        if ins == "":
+            res.success(False)
+            res.err_code(1) # 0: No error || 1: Error
+        else:
+            res.success(True)
+            res.err_code(0) # 0: No error || 1: Error
+        sorted_goals = ', '.join(sorted(inputs))
+        print(f"Available Goals: {sorted_goals}")
+
+        res.configuration(json.dumps(dict(modalities=sorted_modalities, goals=sorted_goals)))
 
     else:
         # Dummy JSON configuration and implementation
