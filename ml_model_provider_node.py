@@ -58,11 +58,14 @@ def task_callback(ml_model_metadata,
 
         # Model selection and information retrieval
         suggested_models = get_models(metadata, graph_path)
-        model_info = get_model_info(suggested_models, graph_path)
-        model_names = list(model_info.keys())
+        # model_info = get_model_info(suggested_models, graph_path)
+        # model_names = [info['name'] for info in model_info]
+        model_names = [model[0] for model in suggested_models]
 
         # Random Model is selected here. In the Final code there should be some sort of selection to choose between Possible Models
-        chosen_model = model_names[0]
+        chosen_model = model_names[1]
+        print(f"")    #Debugging
+        print(f"Chosen model: {chosen_model}")    #Debugging
 
         # Generate model code and keywords
         onnx_path = model(chosen_model)
