@@ -54,6 +54,15 @@ def task_callback(ml_model_metadata,
     if not ml_model_metadata.ml_model_metadata().empty():
 
         try:
+            # Model restriction after various outputs
+            restrained_models = []
+            extra_data_bytes = ml_model_metadata.extra_data()
+            if extra_data_bytes:
+                extra_data_str = ''.join(chr(b) for b in extra_data_bytes)
+                extra_data_dict = json.loads(extra_data_str)
+                if "model_restrains" in extra_data_dict:
+                    restrained_models = extra_data_dict["model_restrains"]
+                    print("Restrained models:", restrained_models)  #debugging
 
             graph = load_graph(os.path.dirname(__file__)+'/graph_v2.ttl')
             metadata = ml_model_metadata.ml_model_metadata()[0]
@@ -67,7 +76,18 @@ def task_callback(ml_model_metadata,
             model_names = [model[0] for model in suggested_models]
 
             # Random Model is selected here. In the Final code there should be some sort of selection to choose between Possible Models
-            chosen_model = model_names[1]
+            for model_use in model_names:
+                # Some models can't be downloaded from HF, TODO: Works for all models
+                if(str(model_use) == "meta-llama/Llama-3.1-8B-Instruct"):
+                    model_use  =  "openai-community/gpt2"
+                if(str(model_use) == "mlx-community/Llama-3.2-1B-Instruct-4bit"):
+                    model_use  =  "openai-community/gpt2-medium"
+                if str(model_use) not in restrained_models:
+                    chosen_model = model_use
+                    break
+                else:
+                    print(f"Chosen model: {model_use} is restrained. Choosing the next model.")
+
             print(f"")    #Debugging
             print(f"Chosen model: {chosen_model}")    #Debugging
 
