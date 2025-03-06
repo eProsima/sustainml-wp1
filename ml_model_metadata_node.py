@@ -22,7 +22,7 @@ import threading
 import time
 import json
 
-from rdftool.rdfCode import get_mlgoals, get_cover_tags
+from rdftool.rdfCode import load_graph, get_problems, get_cover_tags, search_metrics_by_modalities, get_models_for_problem, find_metrics_by_model
 from ollama import Client
 
 # Whether to go on spinning or interrupt
@@ -61,7 +61,7 @@ def task_callback(user_input, node_status, ml_model_metadata):
 
     extra_data_bytes = user_input.extra_data()
     extra_data_str = ''.join(chr(b) for b in extra_data_bytes)
-    extra_data_dict = json.loads(extra_data_str) 
+    extra_data_dict = json.loads(extra_data_str)
 
     if "goal" in extra_data_dict and extra_data_dict["goal"] != "":
         goal = extra_data_dict["goal"]
@@ -69,12 +69,15 @@ def task_callback(user_input, node_status, ml_model_metadata):
         print(f"Skipped ML Model Metadata. ML Goal selected as input: {goal}")
         return
 
-
     client = Client(host='http://localhost:11434')
-    graph_path = os.path.dirname(__file__)+'/CustomGraph.ttl'
+    graph = load_graph(os.path.dirname(__file__)+'/graph_v2.ttl')
 
     # Retrieve Possible Ml Goals from graph
-    mlgoals = get_mlgoals(graph_path)
+    try:
+        mlgoals = get_problems(graph)
+    except Exception as e:
+        print(f"Error in getting problems from MLModel graph: {e}")
+        return
     goals = ', '.join(mlgoals)
 
     # Select MLGoal Using Ollama llama 3
@@ -88,7 +91,7 @@ def task_callback(user_input, node_status, ml_model_metadata):
     if(user_input.modality() != ""):
         problem = f"{problem} with modality {user_input.modality()}"
 
-    print (f"Problem: {problem}")   #Debugging
+    print (f"Problem define: {problem}")   #Debugging
     mlgoal = get_llm_response(client, "llama3", problem, prompt)
 
     if mlgoal != None and mlgoal in goals:
@@ -107,34 +110,102 @@ def configuration_callback(req, res):
     if req.configuration() == "modality":
         res.node_id(req.node_id())
         res.transaction_id(req.transaction_id())
+        try:
+            # Retrieve Possible Ml Goals from graph
+            graph = load_graph(os.path.dirname(__file__)+'/graph_v2.ttl')
+            inputs = get_cover_tags(graph)
+            sorted_modalities = ', '.join(sorted(inputs))
 
-        # Retrieve Possible Ml Goals from graph
-        graph_path = os.path.dirname(__file__)+'/CustomGraph.ttl'
-        inputs = get_cover_tags(graph_path)
-        ins = ', '.join(inputs)
+            if sorted_modalities == "":
+                res.success(False)
+                res.err_code(1) # 0: No error || 1: Error
+            else:
+                res.success(True)
+                res.err_code(0) # 0: No error || 1: Error
+            print(f"Available Modalities: {sorted_modalities}") #debug
 
-        if ins == "":
+            inputs2 = get_problems(graph)
+            sorted_goals = ', '.join(sorted(inputs2[:-1]))  # TODO: fix overflow bug sending goals response to request
+
+            if sorted_goals == "":
+                res.success(False)
+                res.err_code(1) # 0: No error || 1: Error
+            else:
+                res.success(True)
+                res.err_code(0) # 0: No error || 1: Error
+            print(f"Available Goals: {sorted_goals}")   #debug
+
+            json_str = json.dumps(dict(modalities=sorted_modalities, goals=sorted_goals))
+            print(len(json_str))    #debug
+
+            res.configuration(json.dumps(dict(modalities=sorted_modalities, goals=sorted_goals)))
+        except Exception as e:
+            print(f"Error getting goals and modalities from request: {e}")
+            res.success(False)
+            res.err_code(1) # 0: No error || 1: Error
+
+    elif "metrics" in req.configuration():
+        res.node_id(req.node_id())
+        res.transaction_id(req.transaction_id())
+
+        graph = load_graph(os.path.dirname(__file__)+'/graph_v2.ttl')
+
+        # Extracts datas for metrics reception
+        config_content = req.configuration()[len("metrics, "):]  # "metrics, <metric_req_type>: <req_type_values>"
+
+        try:
+            metric_req_type, req_type_values = config_content.split(":", 1)
+            metric_req_type = metric_req_type.strip()
+            req_type_values = req_type_values.strip()
+
+            if metric_req_type == "modality":
+                input_modality, output_modality = req_type_values.split(",", 1)
+                input_modality = input_modality.strip()
+                output_modality = output_modality.strip()
+                metrics = search_metrics_by_modalities(graph, input_modality, output_modality)
+                all_metrics = []
+                for problem, metrics_list in metrics.items():
+                    for model, m in metrics_list.items():
+                        if isinstance(m, list):
+                            for metric in m:
+                                if metric not in all_metrics:
+                                    all_metrics.append(metric)
+                        else:
+                            if m not in all_metrics:
+                                all_metrics.append(m)
+                sorted_metrics = ', '.join(sorted(all_metrics))
+
+            elif metric_req_type == "problem":
+                models = get_models_for_problem(graph, req_type_values)
+                all_metrics = []
+
+                for model,downloads in models:
+                    metrics = find_metrics_by_model(graph, model)
+                    if isinstance(metrics, list):
+                        all_metrics.extend(metrics)
+                    else:
+                        all_metrics.append(metrics)
+
+                sorted_metrics = ', '.join(sorted(all_metrics))
+
+            else:
+                res.success(False)
+                res.err_code(1) # 0: No error || 1: Error
+
+        except Exception as e:
+            print(f"Error getting metrics from request: {e}")
+            res.success(False)
+            res.err_code(1) # 0: No error || 1: Error
+
+        if sorted_metrics == "":
             res.success(False)
             res.err_code(1) # 0: No error || 1: Error
         else:
             res.success(True)
             res.err_code(0) # 0: No error || 1: Error
-        sorted_modalities = ', '.join(sorted(inputs))
-        print(f"Available Modalities: {sorted_modalities}")
+        print(f"Available Metrics: {sorted_metrics}")
 
-        inputs = get_mlgoals(graph_path)
-        ins = ', '.join(inputs)
-
-        if ins == "":
-            res.success(False)
-            res.err_code(1) # 0: No error || 1: Error
-        else:
-            res.success(True)
-            res.err_code(0) # 0: No error || 1: Error
-        sorted_goals = ', '.join(sorted(inputs))
-        print(f"Available Goals: {sorted_goals}")
-
-        res.configuration(json.dumps(dict(modalities=sorted_modalities, goals=sorted_goals)))
+        res.configuration(json.dumps(dict(metrics=sorted_metrics)))
 
     else:
         # Dummy JSON configuration and implementation
