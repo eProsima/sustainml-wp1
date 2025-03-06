@@ -23,7 +23,7 @@ import time
 import json
 
 from rdftool.ModelONNXCodebase import model
-from rdftool.rdfCode import get_models, get_model_info
+from rdftool.rdfCode import load_graph, get_models_for_problem, get_problems, get_model_details, print_models
 
 # Whether to go on spinning or interrupt
 running = False
@@ -53,24 +53,32 @@ def task_callback(ml_model_metadata,
 
     if not ml_model_metadata.ml_model_metadata().empty():
 
-        graph_path = os.path.dirname(__file__)+'/CustomGraph.ttl'
-        metadata = ml_model_metadata.ml_model_metadata()[0]
+        try:
 
-        # Model selection and information retrieval
-        suggested_models = get_models(metadata, graph_path)
-        # model_info = get_model_info(suggested_models, graph_path)
-        # model_names = [info['name'] for info in model_info]
-        model_names = [model[0] for model in suggested_models]
+            graph = load_graph(os.path.dirname(__file__)+'/graph_v2.ttl')
+            metadata = ml_model_metadata.ml_model_metadata()[0]
 
-        # Random Model is selected here. In the Final code there should be some sort of selection to choose between Possible Models
-        chosen_model = model_names[1]
-        print(f"")    #Debugging
-        print(f"Chosen model: {chosen_model}")    #Debugging
+            # Model selection and information retrieval
+            suggested_models = get_models_for_problem(graph, metadata)
+            print("Suggested models ")
+            print_models(suggested_models)
+            # model_info = get_model_details(graph, suggested_models)   # WIP - use for model information
+            # model_names = [info['name'] for info in model_info]
+            model_names = [model[0] for model in suggested_models]
 
-        # Generate model code and keywords
-        onnx_path = model(chosen_model)
-        ml_model.model(chosen_model)
-        ml_model.model_path(onnx_path)
+            # Random Model is selected here. In the Final code there should be some sort of selection to choose between Possible Models
+            chosen_model = model_names[1]
+            print(f"")    #Debugging
+            print(f"Chosen model: {chosen_model}")    #Debugging
+
+            # Generate model code and keywords
+            onnx_path = model(chosen_model)     # WIP - Further development needed
+            ml_model.model(chosen_model)
+            ml_model.model_path(onnx_path)
+
+        except Exception as e:
+            print(f"Error providing valid MLModel: {e}")
+            return
     else:
         raise Exception(f"Failed to determine ML goal for task {ml_model_metadata.task_id()}.")
 
