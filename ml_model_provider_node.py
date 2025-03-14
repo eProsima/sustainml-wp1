@@ -20,6 +20,7 @@ import os
 import signal
 import threading
 import time
+import json
 
 from rdftool.ModelONNXCodebase import model
 from rdftool.rdfCode import get_models, get_model_info
@@ -70,9 +71,29 @@ def task_callback(ml_model_metadata,
     else:
         raise Exception(f"Failed to determine ML goal for task {ml_model_metadata.task_id()}.")
 
+# User Configuration Callback implementation
+# Inputs: req
+# Outputs: res
+def configuration_callback(req, res):
+
+    # Callback for configuration implementation here
+
+    # Dummy JSON configuration and implementation
+    dummy_config = {
+        "param1": "value1",
+        "param2": "value2",
+        "param3": "value3"
+    }
+    res.configuration(json.dumps(dummy_config))
+    res.node_id(req.node_id())
+    res.transaction_id(req.transaction_id())
+    res.success(True)
+    res.err_code(0) # 0: No error || 1: Error
+
+
 # Main workflow routine
 def run():
-    node = MLModelNode(callback=task_callback)
+    node = MLModelNode(callback=task_callback, service_callback=configuration_callback)
     global running
     running = True
     node.spin()
