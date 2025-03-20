@@ -61,6 +61,38 @@ def get_problems_for_cover_tag(graph, cover_tag):
     problems = [row[0] for row in results]
     return problems
 
+def get_modalities_input(graph):
+    ###########################################################
+    ### get modalities inputs machine learning:             ###
+    ###########################################################
+    query = """
+    PREFIX modality: <http://example.org/modality/>
+    PREFIX conn: <http://example.org/conn/>
+
+    SELECT DISTINCT ?modality
+    WHERE {
+        ?type modality:hasInput ?modality ;
+    }
+    """
+    results = graph.query(query)
+    modalities_input = [row[0] for row in results]
+    return modalities_input
+
+def get_modalities_output(graph):
+    ###########################################################
+    ### get modalities outputs machine learning:            ###
+    ###########################################################
+    query = """
+    PREFIX conn: <http://example.org/conn/>
+    SELECT DISTINCT ?modality
+    WHERE {
+        ?type modality:hasOutput ?modality .
+    }
+    """
+    results = graph.query(query)
+    modalities_output = [row[0] for row in results]
+    return modalities_output
+
 def get_all_metrics(graph):
     ###########################################################
     ### get all types of metrics:                           ###
@@ -70,7 +102,7 @@ def get_all_metrics(graph):
     PREFIX metric: <http://example.org/metric/>
     SELECT DISTINCT ?metric
     WHERE {
-      ?metric a metric:Metric.
+        ?metric a metric:Metric.
     }
     """
     results = graph.query(query)
