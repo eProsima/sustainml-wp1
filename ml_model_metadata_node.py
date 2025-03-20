@@ -22,7 +22,11 @@ import threading
 import time
 import json
 
-from rdftool.rdfCode import load_graph, get_problems, get_cover_tags, search_metrics_by_modalities, get_models_for_problem, find_metrics_by_model
+from rdftool.rdfCode import (
+    load_graph, get_problems, get_cover_tags, search_metrics_by_modalities, get_models_for_problem,
+    find_metrics_by_model, get_model_details, get_problems_for_cover_tag, get_all_metrics, get_modalities_input,
+    get_modalities_output
+)
 from ollama import Client
 
 # Whether to go on spinning or interrupt
@@ -59,15 +63,18 @@ def task_callback(user_input, node_status, ml_model_metadata):
 
     print (f"Received Task: {user_input.task_id().problem_id()},{user_input.task_id().iteration_id()}")
 
-    extra_data_bytes = user_input.extra_data()
-    extra_data_str = ''.join(chr(b) for b in extra_data_bytes)
-    extra_data_dict = json.loads(extra_data_str)
+    try:
+        extra_data_bytes = user_input.extra_data()
+        extra_data_str = ''.join(chr(b) for b in extra_data_bytes)
+        extra_data_dict = json.loads(extra_data_str)
 
-    if "goal" in extra_data_dict and extra_data_dict["goal"] != "":
-        goal = extra_data_dict["goal"]
-        ml_model_metadata.ml_model_metadata().append(goal)
-        print(f"Skipped ML Model Metadata. ML Goal selected as input: {goal}")
-        return
+        if "goal" in extra_data_dict and extra_data_dict["goal"] != "":
+            goal = extra_data_dict["goal"]
+            ml_model_metadata.ml_model_metadata().append(goal)
+            print(f"Skipped ML Model Metadata. ML Goal selected as input: {goal}")
+            return
+    except Exception as e:
+        print(f"No extra data was found: {e}")
 
     client = Client(host='http://localhost:11434')
     graph = load_graph(os.path.dirname(__file__)+'/graph_v2.ttl')
@@ -144,6 +151,33 @@ def configuration_callback(req, res):
             res.success(False)
             res.err_code(1) # 0: No error || 1: Error
 
+    elif "in_out_modalities" in req.configuration():
+        res.node_id(req.node_id())
+        res.transaction_id(req.transaction_id())
+        try:
+            # Retrieve Possible Ml Inputs and Outputs modalities
+            graph = load_graph(os.path.dirname(__file__)+'/graph_v2.ttl')
+            inputs = get_modalities_input(graph)
+            sorted_inputs = ', '.join(sorted(inputs))
+            outputs = get_modalities_output(graph)
+            sorted_outputs = ', '.join(sorted(outputs))
+
+            if sorted_inputs == "" or sorted_outputs == "":
+                res.success(False)
+                res.err_code(1) # 0: No error || 1: Error
+            else:
+                res.success(True)
+                res.err_code(0) # 0: No error || 1: Error
+            print(f"Available Input Modalities: {sorted_inputs}") #debug
+            print(f"Available Output Modalities: {sorted_outputs}") #debug
+
+            res.configuration(json.dumps(dict(inputs=sorted_inputs, outputs=sorted_outputs)))
+
+        except Exception as e:
+            print(f"Error getting inputs and outputs modalities from request: {e}")
+            res.success(False)
+            res.err_code(1) # 0: No error || 1: Error
+
     elif "metrics" in req.configuration():
         res.node_id(req.node_id())
         res.transaction_id(req.transaction_id())
@@ -188,6 +222,10 @@ def configuration_callback(req, res):
 
                 sorted_metrics = ', '.join(sorted(all_metrics))
 
+            elif metric_req_type == "all":
+                metrics = get_all_metrics(graph)
+                sorted_metrics = ', '.join(sorted(metrics))
+
             else:
                 res.success(False)
                 res.err_code(1) # 0: No error || 1: Error
@@ -206,6 +244,54 @@ def configuration_callback(req, res):
         print(f"Available Metrics: {sorted_metrics}")
 
         res.configuration(json.dumps(dict(metrics=sorted_metrics)))
+
+    elif 'mode_info' in req.configuration():
+        res.node_id(req.node_id())
+        res.transaction_id(req.transaction_id())
+
+        graph = load_graph(os.path.dirname(__file__) + '/graph_v2.ttl')
+        try:
+            model = req.configuration()[len("mode_info, "):]
+            details = get_model_details(graph, model)
+
+            if not details:
+                res.success(False)
+                res.err_code(1)  # 0: No error || 1: Error
+            else:
+                res.success(True)
+                res.err_code(0)  # 0: No error || 1: Error
+
+            print(f"Model details for {model}: {details}")
+            res.configuration(json.dumps(details))
+        except Exception as e:
+            print(f"Error getting model details from request: {e}")
+            res.success(False)
+            res.err_code(1)
+
+    elif 'problem_from_modality' in req.configuration():
+        res.node_id(req.node_id())
+        res.transaction_id(req.transaction_id())
+
+        graph = load_graph(os.path.dirname(__file__) + '/graph_v2.ttl')
+        try:
+            modality = req.configuration()[len("problem_from_modality, "):]
+            goals = get_problems_for_cover_tag(graph, modality)
+            sorted_goals = ', '.join(sorted(goals))
+
+            if not sorted_goals:
+                res.success(False)
+                res.err_code(1)  # 0: No error || 1: Error
+            else:
+                res.success(True)
+                res.err_code(0)  # 0: No error || 1: Error
+
+            print(f"Problems for {modality}: {goals}")
+            res.configuration(json.dumps(dict(goals=sorted_goals)))
+
+        except Exception as e:
+            print(f"Error getting model details from request: {e}")
+            res.success(False)
+            res.err_code(1)
 
     else:
         # Dummy JSON configuration and implementation
