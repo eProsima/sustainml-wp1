@@ -99,11 +99,19 @@ def task_callback(user_input, node_status, ml_model_metadata):
         problem = f"{problem} with modality {user_input.modality()}"
 
     print (f"Problem define: {problem}")   #Debugging
-    mlgoal = get_llm_response(client, "llama3", problem, prompt)
-
-    if mlgoal != None and mlgoal in goals:
+    mlgoal = None
+    max_attempts = 3
+    attempt = 0
+    while attempt < max_attempts:
+        mlgoal = get_llm_response(client, "llama3", problem, prompt)
+        if mlgoal is not None and mlgoal in goals:
+            break
+        attempt += 1
+        print(f"Retry {attempt}: Response '{mlgoal}' is not among available goals. Retrying...")
+        
+    if mlgoal is not None and mlgoal in goals:
         ml_model_metadata.ml_model_metadata().append(mlgoal)
-        print (f"Selected ML Goal: {mlgoal}")
+        print(f"Selected ML Goal: {mlgoal}")
     else:
         raise Exception(f"Failed to determine ML goal for task {user_input.task_id()}.")
 

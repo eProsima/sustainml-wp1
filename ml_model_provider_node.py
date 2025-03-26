@@ -60,7 +60,7 @@ def task_callback(ml_model_metadata,
 
             # Model selection and information retrieval
             suggested_models = get_models_for_problem(graph, metadata)
-            print("Suggested models ")
+            # print("Suggested models ")
             print_models(suggested_models)
             # model_info = get_model_details(graph, suggested_models)   # WIP - use for model information
             # model_names = [info['name'] for info in model_info]
