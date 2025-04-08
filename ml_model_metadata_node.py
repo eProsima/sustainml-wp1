@@ -32,6 +32,9 @@ from ollama import Client
 # Whether to go on spinning or interrupt
 running = False
 
+# Global variable of the graph
+graph = None
+
 # Signal handler
 def signal_handler(sig, frame):
     print("\nExiting")
@@ -68,6 +71,11 @@ def task_callback(user_input, node_status, ml_model_metadata):
         extra_data_str = ''.join(chr(b) for b in extra_data_bytes)
         extra_data_dict = json.loads(extra_data_str)
 
+        if "model_selected" in extra_data_dict and extra_data_dict["model_selected"] != "":
+            encoded_data = json.dumps({"model_selected": extra_data_dict["model_selected"]}).encode("utf-8")
+            ml_model_metadata.extra_data(encoded_data)
+            print("Model selected:", extra_data_dict["model_selected"])
+
         if "goal" in extra_data_dict and extra_data_dict["goal"] != "":
             goal = extra_data_dict["goal"]
             ml_model_metadata.ml_model_metadata().append(goal)
@@ -77,7 +85,6 @@ def task_callback(user_input, node_status, ml_model_metadata):
         print(f"No extra data was found: {e}")
 
     client = Client(host='http://localhost:11434')
-    graph = load_graph(os.path.dirname(__file__)+'/graph_v2.ttl')
 
     # Retrieve Possible Ml Goals from graph
     try:
@@ -108,7 +115,7 @@ def task_callback(user_input, node_status, ml_model_metadata):
             break
         attempt += 1
         print(f"Retry {attempt}: Response '{mlgoal}' is not among available goals. Retrying...")
-        
+
     if mlgoal is not None and mlgoal in goals:
         ml_model_metadata.ml_model_metadata().append(mlgoal)
         print(f"Selected ML Goal: {mlgoal}")
@@ -127,7 +134,6 @@ def configuration_callback(req, res):
         res.transaction_id(req.transaction_id())
         try:
             # Retrieve Possible Ml Goals from graph
-            graph = load_graph(os.path.dirname(__file__)+'/graph_v2.ttl')
             inputs = get_cover_tags(graph)
             sorted_modalities = ', '.join(sorted(inputs))
 
@@ -164,7 +170,6 @@ def configuration_callback(req, res):
         res.transaction_id(req.transaction_id())
         try:
             # Retrieve Possible Ml Inputs and Outputs modalities
-            graph = load_graph(os.path.dirname(__file__)+'/graph_v2.ttl')
             inputs = get_modalities_input(graph)
             sorted_inputs = ', '.join(sorted(inputs))
             outputs = get_modalities_output(graph)
@@ -189,8 +194,6 @@ def configuration_callback(req, res):
     elif "metrics" in req.configuration():
         res.node_id(req.node_id())
         res.transaction_id(req.transaction_id())
-
-        graph = load_graph(os.path.dirname(__file__)+'/graph_v2.ttl')
 
         # Extracts datas for metrics reception
         config_content = req.configuration()[len("metrics, "):]  # "metrics, <metric_req_type>: <req_type_values>"
@@ -257,7 +260,6 @@ def configuration_callback(req, res):
         res.node_id(req.node_id())
         res.transaction_id(req.transaction_id())
 
-        graph = load_graph(os.path.dirname(__file__) + '/graph_v2.ttl')
         try:
             model = req.configuration()[len("mode_info, "):]
             details = get_model_details(graph, model)
@@ -280,7 +282,6 @@ def configuration_callback(req, res):
         res.node_id(req.node_id())
         res.transaction_id(req.transaction_id())
 
-        graph = load_graph(os.path.dirname(__file__) + '/graph_v2.ttl')
         try:
             modality = req.configuration()[len("problem_from_modality, "):]
             goals = get_problems_for_cover_tag(graph, modality)
@@ -297,7 +298,7 @@ def configuration_callback(req, res):
             res.configuration(json.dumps(dict(goals=sorted_goals)))
 
         except Exception as e:
-            print(f"Error getting model details from request: {e}")
+            print(f"Error getting problems for the modality from request: {e}")
             res.success(False)
             res.err_code(1)
 
@@ -318,6 +319,8 @@ def configuration_callback(req, res):
 # Main workflow routine
 def run():
     node = MLModelMetadataNode(callback=task_callback, service_callback=configuration_callback)
+    global graph
+    graph = load_graph(os.path.dirname(__file__)+'/graph_v2.ttl')
     global running
     running = True
     node.spin()
