@@ -28,6 +28,9 @@ from rdftool.rdfCode import load_graph, get_models_for_problem, get_problems, ge
 # Whether to go on spinning or interrupt
 running = False
 
+# Global variable of the graph
+graph = None
+
 # Signal handler
 def signal_handler(sig, frame):
     print("\nExiting")
@@ -54,20 +57,37 @@ def task_callback(ml_model_metadata,
     if not ml_model_metadata.ml_model_metadata().empty():
 
         try:
+            chosen_model = None
+            # Model restriction after various outputs
+            extra_data_bytes = ml_model_metadata.extra_data()
+            if extra_data_bytes:
+                extra_data_str = ''.join(chr(b) for b in extra_data_bytes)
+                extra_data_dict = json.loads(extra_data_str)
+                if "model_selected" in extra_data_dict:
+                    chosen_model = extra_data_dict["model_selected"]
+                    print("Selected model:", chosen_model)  ##debugging
 
-            graph = load_graph(os.path.dirname(__file__)+'/graph_v2.ttl')
-            metadata = ml_model_metadata.ml_model_metadata()[0]
+            if chosen_model is None:
+                metadata = ml_model_metadata.ml_model_metadata()[0]
 
-            # Model selection and information retrieval
-            suggested_models = get_models_for_problem(graph, metadata)
-            # print("Suggested models ")
-            print_models(suggested_models)
-            # model_info = get_model_details(graph, suggested_models)   # WIP - use for model information
-            # model_names = [info['name'] for info in model_info]
-            model_names = [model[0] for model in suggested_models]
+                # Model selection and information retrieval
+                suggested_models = get_models_for_problem(graph, metadata)
+                # print("Suggested models ")
+                # print_models(suggested_models)
+                # model_info = get_model_details(graph, suggested_models)   # WIP - use for model information
+                # model_names = [info['name'] for info in model_info]
+                model_names = [model[0] for model in suggested_models]
 
-            # Random Model is selected here. In the Final code there should be some sort of selection to choose between Possible Models
-            chosen_model = model_names[1]
+                # Random Model is selected here. In the Final code there should be some sort of selection to choose between Possible Models
+                for model_use in model_names:
+                    # Some models can't be downloaded from HF, TODO: Works for all models
+                    if(str(model_use) == "meta-llama/Llama-3.1-8B-Instruct"):
+                        model_use  =  "openai-community/gpt2"
+                    if(str(model_use) == "mlx-community/Llama-3.2-1B-Instruct-4bit"):
+                        model_use  =  "openai-community/gpt2-medium"
+                    chosen_model = model_use
+                    break
+
             print(f"")    #Debugging
             print(f"Chosen model: {chosen_model}")    #Debugging
 
@@ -89,22 +109,50 @@ def configuration_callback(req, res):
 
     # Callback for configuration implementation here
 
-    # Dummy JSON configuration and implementation
-    dummy_config = {
-        "param1": "value1",
-        "param2": "value2",
-        "param3": "value3"
-    }
-    res.configuration(json.dumps(dummy_config))
-    res.node_id(req.node_id())
-    res.transaction_id(req.transaction_id())
-    res.success(True)
-    res.err_code(0) # 0: No error || 1: Error
+    if 'model_from_goal' in req.configuration():
+        res.node_id(req.node_id())
+        res.transaction_id(req.transaction_id())
+
+        try:
+            goal = req.configuration()[len("model_from_goal, "):]
+            models = get_models_for_problem(graph, goal)
+
+            sorted_models = ', '.join(sorted([str(m[0]) for m in models]))
+
+            if not sorted_models:
+                res.success(False)
+                res.err_code(1)  # 0: No error || 1: Error
+            else:
+                res.success(True)
+                res.err_code(0)  # 0: No error || 1: Error
+
+            print(f"Models for {goal}: {sorted_models}")
+            res.configuration(json.dumps(dict(models=sorted_models)))
+
+        except Exception as e:
+            print(f"Error getting model from goal from request: {e}")
+            res.success(False)
+            res.err_code(1)
+
+    else:
+        # Dummy JSON configuration and implementation
+        dummy_config = {
+            "param1": "value1",
+            "param2": "value2",
+            "param3": "value3"
+        }
+        res.configuration(json.dumps(dummy_config))
+        res.node_id(req.node_id())
+        res.transaction_id(req.transaction_id())
+        res.success(True)
+        res.err_code(0) # 0: No error || 1: Error
 
 
 # Main workflow routine
 def run():
     node = MLModelNode(callback=task_callback, service_callback=configuration_callback)
+    global graph
+    graph = load_graph(os.path.dirname(__file__)+'/graph_v2.ttl')
     global running
     running = True
     node.spin()
