@@ -63,7 +63,7 @@ def get_llm_response(client, model_version, problem_definition, prompt):
 def task_callback(user_input, node_status, ml_model_metadata):
 
     # Callback implementation here
-
+    global graph
     print (f"Received Task: {user_input.task_id().problem_id()},{user_input.task_id().iteration_id()}")
 
     try:
@@ -128,7 +128,7 @@ def task_callback(user_input, node_status, ml_model_metadata):
 def configuration_callback(req, res):
 
     # Callback for configuration implementation here
-
+    global graph
     if req.configuration() == "modality":
         res.node_id(req.node_id())
         res.transaction_id(req.transaction_id())
@@ -318,9 +318,9 @@ def configuration_callback(req, res):
 
 # Main workflow routine
 def run():
-    node = MLModelMetadataNode(callback=task_callback, service_callback=configuration_callback)
     global graph
     graph = load_graph(os.path.dirname(__file__)+'/graph_v2.ttl')
+    node = MLModelMetadataNode(callback=task_callback, service_callback=configuration_callback)
     global running
     running = True
     node.spin()
