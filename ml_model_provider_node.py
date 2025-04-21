@@ -71,6 +71,7 @@ def task_callback(ml_model_metadata,
                 metadata = ml_model_metadata.ml_model_metadata()[0]
 
                 # Model selection and information retrieval
+                global graph
                 suggested_models = get_models_for_problem(graph, metadata)
                 # print("Suggested models ")
                 # print_models(suggested_models)
@@ -100,7 +101,7 @@ def task_callback(ml_model_metadata,
             print(f"Error providing valid MLModel: {e}")
             return
     else:
-        raise Exception(f"Failed to determine ML goal for task {ml_model_metadata.task_id()}.")
+        raise Exception(f"Failed to determine ML model for task {ml_model_metadata.task_id()}.")
 
 # User Configuration Callback implementation
 # Inputs: req
@@ -108,7 +109,7 @@ def task_callback(ml_model_metadata,
 def configuration_callback(req, res):
 
     # Callback for configuration implementation here
-
+    global graph
     if 'model_from_goal' in req.configuration():
         res.node_id(req.node_id())
         res.transaction_id(req.transaction_id())
@@ -150,9 +151,9 @@ def configuration_callback(req, res):
 
 # Main workflow routine
 def run():
-    node = MLModelNode(callback=task_callback, service_callback=configuration_callback)
     global graph
     graph = load_graph(os.path.dirname(__file__)+'/graph_v2.ttl')
+    node = MLModelNode(callback=task_callback, service_callback=configuration_callback)
     global running
     running = True
     node.spin()
