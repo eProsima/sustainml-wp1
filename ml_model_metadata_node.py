@@ -71,6 +71,10 @@ def task_callback(user_input, node_status, ml_model_metadata):
         extra_data_str = ''.join(chr(b) for b in extra_data_bytes)
         extra_data_dict = json.loads(extra_data_str)
 
+        if "model_restrains" in extra_data_dict:
+            encoded_data = json.dumps({"model_restrains": extra_data_dict["model_restrains"]}).encode("utf-8")
+            ml_model_metadata.extra_data(encoded_data)
+
         if "model_selected" in extra_data_dict and extra_data_dict["model_selected"] != "":
             encoded_data = json.dumps({"model_selected": extra_data_dict["model_selected"]}).encode("utf-8")
             ml_model_metadata.extra_data(encoded_data)
