@@ -23,7 +23,7 @@ import time
 import json
 
 from rdftool.rdfCode import (
-    load_graph, get_problems, get_cover_tags, search_metrics_by_modalities, get_models_for_problem,
+    load_graph, get_problems, get_cover_tags, search_metrics_by_modalities, get_models_for_problem, get_models_for_problem_and_tag,
     find_metrics_by_model, get_model_details, get_problems_for_cover_tag, get_all_metrics, get_modalities_input,
     get_modalities_output
 )
@@ -70,15 +70,22 @@ def task_callback(user_input, node_status, ml_model_metadata):
         extra_data_bytes = user_input.extra_data()
         extra_data_str = ''.join(chr(b) for b in extra_data_bytes)
         extra_data_dict = json.loads(extra_data_str)
+        accumulated_data = {}
 
         if "model_restrains" in extra_data_dict:
-            encoded_data = json.dumps({"model_restrains": extra_data_dict["model_restrains"]}).encode("utf-8")
-            ml_model_metadata.extra_data(encoded_data)
+            accumulated_data["model_restrains"] = extra_data_dict["model_restrains"]
+            print("Modelos restringidos:", extra_data_dict["model_restrains"])  #debug
 
         if "model_selected" in extra_data_dict and extra_data_dict["model_selected"] != "":
-            encoded_data = json.dumps({"model_selected": extra_data_dict["model_selected"]}).encode("utf-8")
-            ml_model_metadata.extra_data(encoded_data)
+            accumulated_data["model_selected"] = extra_data_dict["model_selected"]
             print("Model selected:", extra_data_dict["model_selected"])
+
+        if "type" in extra_data_dict and extra_data_dict["type"] != "":
+            accumulated_data["type"] = extra_data_dict["type"]
+            print("Limit tag:", extra_data_dict["type"])
+
+        encoded_data = json.dumps(accumulated_data).encode("utf-8")
+        ml_model_metadata.extra_data(encoded_data)
 
         if "goal" in extra_data_dict and extra_data_dict["goal"] != "":
             goal = extra_data_dict["goal"]
@@ -96,16 +103,14 @@ def task_callback(user_input, node_status, ml_model_metadata):
     except Exception as e:
         print(f"Error in getting problems from MLModel graph: {e}")
         return
-    goals = ', '.join(mlgoals)
+    goals = [str(goal) for goal in mlgoals]
 
     # Select MLGoal Using Ollama llama 3
-    prompt = f"Which of the following machine learning Goals can be used to solve this problem (or part of it): {goals}. Answer with only one of the Machine learning goals and with nothing else"
+    prompt = f"Which of the following machine learning Goals can be used to solve this problem: {goals}?. Answer with only one of the Machine learning goals and nothing more, just the goal name without "" or '. If you are not sure, answer with 'None'."
 
-    if(user_input.problem_definition() == ""):
-        problem = user_input.problem_short_description()
-    else:
-        problem = user_input.problem_definition()
-
+    problem = user_input.problem_short_description()
+    if(user_input.problem_definition() != ""):
+        problem = f"{problem}. {user_input.problem_definition()}"
     if(user_input.modality() != ""):
         problem = f"{problem} with modality {user_input.modality()}"
 
@@ -114,10 +119,11 @@ def task_callback(user_input, node_status, ml_model_metadata):
     max_attempts = 3
     attempt = 0
     while attempt < max_attempts:
-        mlgoal = get_llm_response(client, "llama3", problem, prompt)
+        mlgoal = get_llm_response(client, "llama3", problem, prompt).strip().lower()
         if mlgoal is not None and mlgoal in goals:
             break
         attempt += 1
+        prompt = f"Your previous answer '{mlgoal}' was not valid. {prompt}"
         print(f"Retry {attempt}: Response '{mlgoal}' is not among available goals. Retrying...")
 
     if mlgoal is not None and mlgoal in goals:
@@ -150,7 +156,7 @@ def configuration_callback(req, res):
             print(f"Available Modalities: {sorted_modalities}") #debug
 
             inputs2 = get_problems(graph)
-            sorted_goals = ', '.join(sorted(inputs2[:-1]))  # TODO: fix overflow bug sending goals response to request
+            sorted_goals = ', '.join(sorted(inputs2))  # TODO: fix overflow bug sending goals response to request
 
             if sorted_goals == "":
                 res.success(False)
@@ -225,7 +231,7 @@ def configuration_callback(req, res):
                 sorted_metrics = ', '.join(sorted(all_metrics))
 
             elif metric_req_type == "problem":
-                models = get_models_for_problem(graph, req_type_values)
+                models = get_models_for_problem_and_tag(graph, req_type_values, "transforners") # TODO: how to pass type tag
                 all_metrics = []
 
                 for model,downloads in models:

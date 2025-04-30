@@ -23,7 +23,7 @@ import time
 import json
 
 from rdftool.ModelONNXCodebase import model
-from rdftool.rdfCode import load_graph, get_models_for_problem, get_problems, get_model_details, print_models
+from rdftool.rdfCode import load_graph, get_models_for_problem, get_models_for_problem_and_tag, get_problems, get_model_details, print_models
 
 # Whether to go on spinning or interrupt
 running = False
@@ -60,10 +60,15 @@ def task_callback(ml_model_metadata,
             chosen_model = None
             # Model restriction after various outputs
             restrained_models = []
+            type = None
             extra_data_bytes = ml_model_metadata.extra_data()
             if extra_data_bytes:
                 extra_data_str = ''.join(chr(b) for b in extra_data_bytes)
                 extra_data_dict = json.loads(extra_data_str)
+                if "type" in extra_data_dict:
+                    type = extra_data_dict["type"]
+                    print("Limit:", type)  #debugging
+
                 if "model_restrains" in extra_data_dict:
                     restrained_models = extra_data_dict["model_restrains"]
                     print("Restrained models:", restrained_models)  #debugging
@@ -77,7 +82,11 @@ def task_callback(ml_model_metadata,
 
                 # Model selection and information retrieval
                 global graph
-                suggested_models = get_models_for_problem(graph, metadata)
+                if type is not None:
+                    print(f"Limiting search to models with tag: {type}")
+                    suggested_models = get_models_for_problem_and_tag(graph, metadata, type)
+                else:
+                    suggested_models = get_models_for_problem(graph, metadata)
                 # print("Suggested models ")
                 # print_models(suggested_models)
                 # model_info = get_model_details(graph, suggested_models)   # WIP - use for model information
@@ -87,10 +96,8 @@ def task_callback(ml_model_metadata,
                 # Random Model is selected here. In the Final code there should be some sort of selection to choose between Possible Models
                 for model_use in model_names:
                     # Some models can't be downloaded from HF, TODO: Works for all models
-                    if(str(model_use) == "meta-llama/Llama-3.1-8B-Instruct"):
-                        model_use  =  "openai-community/gpt2"
-                    if(str(model_use) == "mlx-community/Llama-3.2-1B-Instruct-4bit"):
-                        model_use  =  "openai-community/gpt2-medium"
+                    if "llama" in str(model_use).lower():
+                        continue
                     if str(model_use) not in restrained_models:
                         chosen_model = model_use
                         break
@@ -124,7 +131,7 @@ def configuration_callback(req, res):
 
         try:
             goal = req.configuration()[len("model_from_goal, "):]
-            models = get_models_for_problem(graph, goal)
+            models = get_models_for_problem_and_tag(graph, goal, "transforners") # TODO: how to pass type tag
 
             sorted_models = ', '.join(sorted([str(m[0]) for m in models]))
 
