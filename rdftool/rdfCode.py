@@ -289,6 +289,31 @@ def get_models_for_problem(graph, problem_literal_text):
     models = [(row[0], row[1]) for row in results]
     return models
 
+def get_models_for_problem_and_tag(graph, problem_literal_text, tag):
+    ###########################################################
+    ### get models with correct machine learning goal and   ###
+    ### with the specified tag (e.g., transformers)         ###
+    ###########################################################
+    problem_literal = Literal(problem_literal_text, datatype=XSD.string)
+    tag_literal = Literal(tag, datatype=XSD.string)
+
+    query = """
+    PREFIX conn: <http://example.org/conn/>
+    PREFIX model: <http://example.org/model/>
+    SELECT ?model ?downloads
+    WHERE {
+      ?model a conn:Model .
+      ?model conn:hasProblem ?problem .
+      ?model conn:hasTag ?modelTag .
+      ?model conn:downloads ?downloads .
+      FILTER (?problem = ?problem_literal && ?modelTag = ?tag_literal)
+    }
+    ORDER BY DESC(?downloads)
+    """
+
+    results = graph.query(query, initBindings={'problem_literal': problem_literal, 'tag_literal': tag_literal})
+    models = [(row[0], row[1]) for row in results]
+    return models
 
 def get_model_details(graph, model_name):
     ###########################################################
