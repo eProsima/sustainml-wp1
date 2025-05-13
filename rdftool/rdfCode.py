@@ -131,6 +131,25 @@ def find_metrics_by_model(graph, model_name):
     metrics = [str(row[0]) for row in results]
     return metrics
 
+def search_metrics_by_cover_tag(graph, cover_tag):
+    ###########################################################
+    ### get metrics for a specific cover tag:               ###
+    ###########################################################
+    problems = get_problems_for_cover_tag(graph, cover_tag)
+    metrics_for_all_problems = {}
+    for problem in problems:
+        models = get_models_for_problem(graph, problem)
+        models_with_metrics = {}
+
+        for model,downloads in models:
+
+            metrics = find_metrics_by_model(graph, model)
+            models_with_metrics[model] = metrics
+
+        metrics_for_all_problems[problem] = models_with_metrics
+
+    return metrics_for_all_problems
+
 def search_metrics_by_input_modalities(graph, input_modality):
     ###########################################################
     ### get metrics for a input modality:                  ###
@@ -286,6 +305,7 @@ def get_models_for_problem(graph, problem_literal_text):
     """
 
     results = graph.query(query, initBindings={'problem_literal': problem_literal})
+
     models = [(row[0], row[1]) for row in results]
     return models
 

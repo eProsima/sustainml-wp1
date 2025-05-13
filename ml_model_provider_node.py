@@ -54,69 +54,68 @@ def task_callback(ml_model_metadata,
 
     print (f"Received Task: {ml_model_metadata.task_id().problem_id()},{ml_model_metadata.task_id().iteration_id()}")
 
-    if not ml_model_metadata.ml_model_metadata().empty():
+    try:
+        chosen_model = None
+        # Model restriction after various outputs
+        restrained_models = []
+        type = None
+        extra_data_bytes = ml_model_metadata.extra_data()
+        if extra_data_bytes:
+            extra_data_str = ''.join(chr(b) for b in extra_data_bytes)
+            extra_data_dict = json.loads(extra_data_str)
+            if "type" in extra_data_dict:
+                type = extra_data_dict["type"]
 
-        try:
-            chosen_model = None
-            # Model restriction after various outputs
-            restrained_models = []
-            type = None
-            extra_data_bytes = ml_model_metadata.extra_data()
-            if extra_data_bytes:
-                extra_data_str = ''.join(chr(b) for b in extra_data_bytes)
-                extra_data_dict = json.loads(extra_data_str)
-                if "type" in extra_data_dict:
-                    type = extra_data_dict["type"]
-                    print("Limit:", type)  #debugging
+            if "model_restrains" in extra_data_dict:
+                restrained_models = extra_data_dict["model_restrains"]
 
-                if "model_restrains" in extra_data_dict:
-                    restrained_models = extra_data_dict["model_restrains"]
-                    print("Restrained models:", restrained_models)  #debugging
+            if "model_selected" in extra_data_dict:
+                chosen_model = extra_data_dict["model_selected"]
+                print("Model already selected: ", chosen_model)
 
-                if "model_selected" in extra_data_dict:
-                    chosen_model = extra_data_dict["model_selected"]
-                    print("Selected model:", chosen_model)  ##debugging
+        if chosen_model is None:
+            metadata = ml_model_metadata.ml_model_metadata()[0]
 
-            if chosen_model is None:
-                metadata = ml_model_metadata.ml_model_metadata()[0]
+            # Model selection and information retrieval
+            global graph
+            if type is not None:
+                print(f"Limiting search to models with tag: {type}")
+                suggested_models = get_models_for_problem_and_tag(graph, metadata, type)
+            else:
+                suggested_models = get_models_for_problem(graph, metadata)
 
-                # Model selection and information retrieval
-                global graph
-                if type is not None:
-                    print(f"Limiting search to models with tag: {type}")
-                    suggested_models = get_models_for_problem_and_tag(graph, metadata, type)
+            # model_info = get_model_details(graph, suggested_models)
+            # model_names = [info['name'] for info in model_info]
+            model_names = [model[0] for model in suggested_models]
+
+            # Random Model is selected here. In the Final code there should be some sort of selection to choose between Possible Models
+            for model_use in model_names:
+                # Some models can't be downloaded from HF, TODO: Works for all models
+                if "llama" in str(model_use).lower():
+                    continue
+                if str(model_use) not in restrained_models:
+                    chosen_model = model_use
+                    break
                 else:
-                    suggested_models = get_models_for_problem(graph, metadata)
-                # print("Suggested models ")
-                # print_models(suggested_models)
-                # model_info = get_model_details(graph, suggested_models)   # WIP - use for model information
-                # model_names = [info['name'] for info in model_info]
-                model_names = [model[0] for model in suggested_models]
+                    print(f"Chosen model: {model_use} is restrained. The restrained models are {restrained_models}. Choosing the next model.")
+            else:
+                raise Exception("No valid model could be selected.")
 
-                # Random Model is selected here. In the Final code there should be some sort of selection to choose between Possible Models
-                for model_use in model_names:
-                    # Some models can't be downloaded from HF, TODO: Works for all models
-                    if "llama" in str(model_use).lower():
-                        continue
-                    if str(model_use) not in restrained_models:
-                        chosen_model = model_use
-                        break
-                    else:
-                        print(f"Chosen model: {model_use} is restrained. Choosing the next model.")
+        print(f"ML Model chosen: {chosen_model}")
 
-            print(f"")    #Debugging
-            print(f"Chosen model: {chosen_model}")    #Debugging
+        # Generate model code and keywords
+        onnx_path = model(chosen_model)     # TODO - Further development needed
+        ml_model.model(chosen_model)
+        ml_model.model_path(onnx_path)
 
-            # Generate model code and keywords
-            onnx_path = model(chosen_model)     # WIP - Further development needed
-            ml_model.model(chosen_model)
-            ml_model.model_path(onnx_path)
-
-        except Exception as e:
-            print(f"Error providing valid MLModel: {e}")
-            return
-    else:
-        raise Exception(f"Failed to determine ML model for task {ml_model_metadata.task_id()}.")
+    except Exception as e:
+        print(f"Failed to determine ML model for task {ml_model_metadata.task_id()}: {e}.")
+        ml_model.model()("Error")
+        ml_model.model_path()("Error")
+        error_message = "Failed to obtain ML model for task: " + str(e)
+        error_info = {"error": error_message}
+        encoded_error = json.dumps(error_info).encode("utf-8")
+        ml_model.extra_data(encoded_error)
 
 # User Configuration Callback implementation
 # Inputs: req
@@ -130,8 +129,15 @@ def configuration_callback(req, res):
         res.transaction_id(req.transaction_id())
 
         try:
-            goal = req.configuration()[len("model_from_goal, "):]
-            models = get_models_for_problem_and_tag(graph, goal, "transforners") # TODO: how to pass type tag
+            text = req.configuration()[len("model_from_goal, "):]
+            parts = text.split(',')
+            if len(parts) >= 2:
+                goal = parts[0].strip()
+                tag = parts[1].strip()
+                models = get_models_for_problem_and_tag(graph, goal, tag)
+            else:
+                goal = text.strip()
+                models = get_models_for_problem(graph, goal)
 
             sorted_models = ', '.join(sorted([str(m[0]) for m in models]))
 
@@ -142,7 +148,7 @@ def configuration_callback(req, res):
                 res.success(True)
                 res.err_code(0)  # 0: No error || 1: Error
 
-            print(f"Models for {goal}: {sorted_models}")
+            print(f"Models for {goal}: {sorted_models}")    #debug
             res.configuration(json.dumps(dict(models=sorted_models)))
 
         except Exception as e:
@@ -151,17 +157,13 @@ def configuration_callback(req, res):
             res.err_code(1)
 
     else:
-        # Dummy JSON configuration and implementation
-        dummy_config = {
-            "param1": "value1",
-            "param2": "value2",
-            "param3": "value3"
-        }
-        res.configuration(json.dumps(dummy_config))
         res.node_id(req.node_id())
         res.transaction_id(req.transaction_id())
-        res.success(True)
-        res.err_code(0) # 0: No error || 1: Error
+        error_msg = f"Unsupported configuration request: {req.configuration()}"
+        res.configuration(json.dumps({"error": error_msg}))
+        res.success(False)
+        res.err_code(1) # 0: No error || 1: Error
+        print(error_msg)
 
 
 # Main workflow routine
