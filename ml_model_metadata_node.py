@@ -103,16 +103,26 @@ def task_callback(user_input, node_status, ml_model_metadata):
     goals = [str(goal) for goal in mlgoals]
 
     # Select MLGoal Using Ollama llama 3
-    prompt = f"Which of the following machine learning Goals can be used to solve this problem: {goals}?. Answer with only one of the Machine learning goals and nothing more, just the goal name without "" or '. If you are not sure, answer with 'None'."
+    prompt = f"Which of the following machine learning Goals can be used to solve this problem: {goals}?. Answer with only one of the Machine learning goals and nothing more, just the goal name without "" or ''. If you are not sure, answer with 'None'."
+    if(user_input.modality() != ""):
+        prompt = f"{prompt} Using the modality {user_input.modality()}."
+    # Add metrics to the prompt
+    if(user_input.inputs()):
+        prompt = f"{prompt} The user inputs known are {', '.join(user_input.inputs())}."
+    if(user_input.outputs()):
+        prompt = f"{prompt} The user outputs known are {', '.join(user_input.outputs())}."
+    if isinstance(user_input.minimum_samples(), int) and user_input.minimum_samples() > 0:
+        prompt = f"{prompt} Have into account that needs to have {user_input.minimum_samples()} minimum samples."
+    if isinstance(user_input.maximum_samples(), int) and user_input.maximum_samples() > 0:
+        prompt = f"{prompt} Have into account that needs to have {user_input.maximum_samples()} maximum samples."
 
     problem = user_input.problem_short_description()
     if(user_input.problem_definition() != ""):
-        problem = f"{problem}. {user_input.problem_definition()}"
-    if(user_input.modality() != ""):
-        problem = f"{problem} with modality {user_input.modality()}"
+        problem = f"{problem}. {user_input.problem_definition()}."
 
     print (f"Complete problem defined: {problem}")
     print (f"Complete prompt use: {prompt}")
+
     mlgoal = None
     max_attempts = 3
     attempt = 0
@@ -354,7 +364,7 @@ def configuration_callback(req, res):
         res.configuration(json.dumps({"error": error_msg}))
         res.success(False)
         res.err_code(1) # 0: No error || 1: Error
-        raise Exception(error_msg)
+        print(error_msg)
 
 
 # Main workflow routine
