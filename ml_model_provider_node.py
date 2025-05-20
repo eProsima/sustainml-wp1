@@ -110,8 +110,8 @@ def task_callback(ml_model_metadata,
 
     except Exception as e:
         print(f"Failed to determine ML model for task {ml_model_metadata.task_id()}: {e}.")
-        ml_model.model()("Error")
-        ml_model.model_path()("Error")
+        ml_model.model("Error")
+        ml_model.model_path("Error")
         error_message = "Failed to obtain ML model for task: " + str(e)
         error_info = {"error": error_message}
         encoded_error = json.dumps(error_info).encode("utf-8")
