@@ -354,7 +354,7 @@ def configuration_callback(req, res):
         res.configuration(json.dumps({"error": error_msg}))
         res.success(False)
         res.err_code(1) # 0: No error || 1: Error
-        raise Exception(error_msg)
+        print(error_msg)
 
 
 # Main workflow routine
