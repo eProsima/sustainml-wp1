@@ -35,6 +35,54 @@ running = False
 # Global variable of the graph
 graph = None
 
+unsupported_goals = [
+                "any-to-any",
+                "audio-classification",
+                "audio-text-to-text",
+                "audio-to-audio",
+                "automatic-speech-recognition",
+                "depth-estimation",
+                "document-question-answering",
+                "feature-extraction",
+                "fill-mask",
+                "graph-ml",
+                "image-classification",
+                "image-feature-extraction",
+                "image-segmentation",
+                "image-text-to-text",
+                "image-to-3d",
+                "image-to-image",
+                "image-to-text",
+                "image-to-video",
+                "keypoint-detection",
+                "mask-generation",
+                "object-detection",
+                "question-answering",
+                "reinforcement-learning",
+                "robotics",
+                "sentence-similarity",
+                "table-question-answering",
+                "tabular-classification",
+                "tabular-regression",
+                "text-classification",
+                "text-to-3d",
+                "text-to-audio",
+                "text-to-image",
+                "text-to-speech",
+                "text-to-video",
+                "text2text-generation",
+                "time-series-forecasting",
+                "token-classification",
+                "unconditional-image-generation",
+                "video-classification",
+                "video-text-to-text",
+                "visual-question-answering",
+                "voice-activity-detection",
+                "zero-shot-classification",
+                "zero-shot-image-classification",
+                "zero-shot-object-detection"
+            ]
+
 # Signal handler
 def signal_handler(sig, frame):
     print("\nExiting")
@@ -96,11 +144,12 @@ def task_callback(user_input, node_status, ml_model_metadata):
 
     # Retrieve Possible Ml Goals from graph
     try:
-        mlgoals = get_problems(graph)
+        raw_goals = get_problems(graph)
+        inputs = [str(g) for g in raw_goals]
+        goals = [goal for goal in inputs if goal not in unsupported_goals]
     except Exception as e:
         print(f"Error in getting problems from MLModel graph: {e}")
         return
-    goals = [str(goal) for goal in mlgoals]
 
     # Select MLGoal Using Ollama llama 3
     prompt = f"Which of the following machine learning Goals can be used to solve this problem: {goals}?. Answer with only one of the Machine learning goals and nothing more, just the goal name without "" or ''. If you are not sure, answer with 'None'."
@@ -158,8 +207,18 @@ def configuration_callback(req, res):
         res.transaction_id(req.transaction_id())
         try:
             # Retrieve Possible Ml Goals from graph
-            inputs = get_cover_tags(graph)
-            sorted_modalities = ', '.join(sorted(inputs))
+            raw_modality = get_cover_tags(graph)
+            inputs = [str(m) for m in raw_modality]
+            unsupported_modality = [
+                "audio",
+                "cv",
+                "multimodal",
+                "other",
+                "rl",
+                "tabular"
+            ]
+            supported_modality = [modality for modality in inputs if modality not in unsupported_modality]
+            sorted_modalities = ', '.join(sorted(supported_modality))
 
             if sorted_modalities == "":
                 res.success(False)
@@ -169,8 +228,10 @@ def configuration_callback(req, res):
                 res.err_code(0) # 0: No error || 1: Error
             print(f"Available Modalities: {sorted_modalities}") #debug
 
-            inputs2 = get_problems(graph)
-            sorted_goals = ', '.join(sorted(inputs2))  # TODO: fix overflow bug sending goals response to request
+            raw_goals = get_problems(graph)
+            inputs = [str(g) for g in raw_goals]
+            supported_goals = [goal for goal in inputs if goal not in unsupported_goals]
+            sorted_goals = ', '.join(sorted(supported_goals))  # TODO: fix overflow bug sending goals response to request
 
             if sorted_goals == "":
                 res.success(False)
