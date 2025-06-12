@@ -91,7 +91,7 @@ def task_callback(ml_model_metadata,
             # Random Model is selected here. In the Final code there should be some sort of selection to choose between Possible Models
             for model_use in model_names:
                 # Some models can't be downloaded from HF, TODO: Works for all models
-                if "llama" in str(model_use).lower():
+                if "llama" in str(model_use).lower() or "mistral" in str(model_use).lower() or "bloom" in str(model_use).lower():
                     continue
                 if str(model_use) not in restrained_models:
                     chosen_model = model_use
