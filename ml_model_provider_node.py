@@ -62,7 +62,12 @@ def task_callback(ml_model_metadata,
         extra_data_bytes = ml_model_metadata.extra_data()
         if extra_data_bytes:
             extra_data_str = ''.join(chr(b) for b in extra_data_bytes)
-            extra_data_dict = json.loads(extra_data_str)
+            try:
+                extra_data_dict = json.loads(extra_data_str)
+            except json.JSONDecodeError:
+                print("[WARN] In model_provider node extra_data JSON is not valid.")
+                extra_data_dict = {}
+
             if "type" in extra_data_dict:
                 type = extra_data_dict["type"]
 
