@@ -23,12 +23,6 @@ def dataset_profiler(data_frame):
             num_distinct_values = column_meta['num_distinct_values']
             column_summary += f"There are {num_distinct_values} unique values. "
 
-        # Semantic types (simplified)
-        # semantic_types = column_meta.get('semantic_types', [])
-        # if semantic_types:
-        #     semantic_summary = ', '.join([semantic_type.split('/')[-1].replace('_', ' ').lower() for semantic_type in semantic_types])
-        #     column_summary += f"Semantic types include: {semantic_summary}. "
-
         # Handle coverage (if available)
         if 'coverage' in column_meta:
             low=0
@@ -65,11 +59,6 @@ def dataset_profiler(data_frame):
             col_names = ', '.join(spatial_cov['column_names'])
             spatial_resolution = spatial_cov['type']
             semantic_summary.append(f"**Spatial coverage** for columns {col_names}, with type {spatial_resolution}.")
-
-    # Attribute keywords
-    # if 'attribute_keywords' in metadata:
-    #     keywords = ', '.join(metadata['attribute_keywords'])
-    #     semantic_summary.append(f"**Attribute keywords**: {keywords}.")
 
     # Final summary as a human-readable text
     final_semantic_summary = '\n'.join(semantic_summary)

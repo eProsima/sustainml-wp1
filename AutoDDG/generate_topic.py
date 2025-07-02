@@ -36,14 +36,6 @@ class DatasetTopicGenerator:
 
         prompt += (f"Dataset Sample: {dataset_sample}\n\n"
                    f"Topic (2-3 words):")
-
-        
-        # prompt = (f"Using the dataset information provided, generate a concise topic in 2-3 words that best "
-        #           f"describes the dataset's primary theme:\n\n"
-        #           f"Title: {title}\n"
-        #           f"Original Description: {original_description}\n"
-        #           f"Dataset Sample: {dataset_sample}\n\n"
-        #           f"Topic (2-3 words):")
         
         return prompt
     

@@ -30,7 +30,6 @@ from rdftool.rdfCode import (
 )
 
 from AutoDDG.generate_description import SemanticProfiler, DatasetDescriptionGenerator
-from AutoDDG.generate_topic import DatasetTopicGenerator
 from AutoDDG.utils import get_sample, json_to_dataframe
 from AutoDDG.data_process import dataset_profiler
 
@@ -462,8 +461,6 @@ def configuration_callback(req, res):
                     data = json.load(f)
                 df = json_to_dataframe(data)
 
-            title = ''
-            original_description = ''
             sample_df, dataset_sample = get_sample(df, sample_size=10)
 
             # Load the semantic profiler
@@ -473,10 +470,6 @@ def configuration_callback(req, res):
             basic_profile, semantic_profile_part1 = dataset_profiler(df)
             semantic_profile_part2 = semantic_profiler.analyze_dataframe(sample_df)
             semantic_profile = semantic_profile_part1+'\n'+semantic_profile_part2
-
-            # Generate the dataset topic
-            # data_topic_generator = DatasetTopicGenerator(client=client, model_name="llama3")
-            # data_topic = data_topic_generator.generate_topic(title, original_description, dataset_sample)
 
             # We use the basic and semantic profiles, and the dataset topic to generate the dataset description
             description_generator = DatasetDescriptionGenerator(client=client, model_name="llama3")
