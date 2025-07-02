@@ -21,12 +21,19 @@ import signal
 import threading
 import time
 import json
+import pandas as pd
 
 from rdftool.rdfCode import (
     load_graph, get_problems, get_cover_tags, search_metrics_by_modalities, get_models_for_problem, get_models_for_problem_and_tag,
     find_metrics_by_model, get_model_details, get_problems_for_cover_tag, get_all_metrics, get_modalities_input,
     get_modalities_output, search_metrics_by_cover_tag
 )
+
+from AutoDDG.generate_description import SemanticProfiler, DatasetDescriptionGenerator
+from AutoDDG.generate_topic import DatasetTopicGenerator
+from AutoDDG.utils import get_sample, json_to_dataframe
+from AutoDDG.data_process import dataset_profiler
+
 from ollama import Client
 
 # Whether to go on spinning or interrupt
@@ -113,12 +120,14 @@ def task_callback(user_input, node_status, ml_model_metadata):
     # Callback implementation here
     global graph
     print (f"Received Task: {user_input.task_id().problem_id()},{user_input.task_id().iteration_id()}")
+    client = Client(host='http://localhost:11434')
 
     try:
         extra_data_bytes = user_input.extra_data()
         extra_data_str = ''.join(chr(b) for b in extra_data_bytes)
         extra_data_dict = json.loads(extra_data_str)
         accumulated_data = {}
+        dataset_metadata = {}
 
         if "model_restrains" in extra_data_dict:
             accumulated_data["model_restrains"] = extra_data_dict["model_restrains"]
@@ -137,10 +146,25 @@ def task_callback(user_input, node_status, ml_model_metadata):
             ml_model_metadata.ml_model_metadata().append(goal)
             print(f"Skipped ML Model Metadata. ML Goal selected as input: {goal}")
             return
+        
+        if "dataset_metadata_description" in extra_data_dict:
+            dataset_metadata["description"] = extra_data_dict["dataset_metadata_description"]
+
+        if "dataset_metadata_topic" in extra_data_dict:
+            dataset_metadata["topic"] = extra_data_dict["dataset_metadata_topic"]
+
+        if "dataset_metadata_profile" in extra_data_dict:
+            dataset_metadata["profile"] = extra_data_dict["dataset_metadata_profile"]
+
+        if "dataset_metadata_keywords" in extra_data_dict:
+            dataset_metadata["keywords"] = extra_data_dict["dataset_metadata_keywords"]
+
+        if "dataset_metadata_applications" in extra_data_dict:
+            dataset_metadata["applications"] = extra_data_dict["dataset_metadata_applications"]
+
     except Exception as e:
         print(f"No extra data was found: {e}")
 
-    client = Client(host='http://localhost:11434')
 
     # Retrieve Possible Ml Goals from graph
     try:
@@ -164,6 +188,8 @@ def task_callback(user_input, node_status, ml_model_metadata):
         prompt = f"{prompt} Have into account that needs to have {user_input.minimum_samples()} minimum samples."
     if isinstance(user_input.maximum_samples(), int) and user_input.maximum_samples() > 0:
         prompt = f"{prompt} Have into account that needs to have {user_input.maximum_samples()} maximum samples."
+    if dataset_metadata:
+        prompt = f"{prompt} The dataset that must be analyzed with the chosen Goal has the following metadata {json.dumps(dataset_metadata)}."
 
     problem = user_input.problem_short_description()
     if(user_input.problem_definition() != ""):
@@ -417,6 +443,59 @@ def configuration_callback(req, res):
             print(f"Error getting problems for the modality from request: {e}")
             res.success(False)
             res.err_code(1)
+
+    elif 'dataset_path' in req.configuration():
+        res.node_id(req.node_id())
+        res.transaction_id(req.transaction_id())
+
+        client = Client(host='http://localhost:11434')
+        try:
+            dataset_path = req.configuration()[len("dataset_path, "):]
+            print(f"Dataset path received: {dataset_path}")  #debug
+
+            if dataset_path.endswith('.csv'):
+                # Load the CSV file
+                df = pd.read_csv(dataset_path)
+            elif dataset_path.endswith('.json'):
+                # Load the JSON file
+                with open(dataset_path) as f:
+                    data = json.load(f)
+                df = json_to_dataframe(data)
+
+            title = ''
+            original_description = ''
+            sample_df, dataset_sample = get_sample(df, sample_size=10)
+
+            # Load the semantic profiler
+            semantic_profiler = SemanticProfiler(client=client, model_name="llama3")
+
+            # Generate the basic and semantic profiles
+            basic_profile, semantic_profile_part1 = dataset_profiler(df)
+            semantic_profile_part2 = semantic_profiler.analyze_dataframe(sample_df)
+            semantic_profile = semantic_profile_part1+'\n'+semantic_profile_part2
+
+            # Generate the dataset topic
+            # data_topic_generator = DatasetTopicGenerator(client=client, model_name="llama3")
+            # data_topic = data_topic_generator.generate_topic(title, original_description, dataset_sample)
+
+            # We use the basic and semantic profiles, and the dataset topic to generate the dataset description
+            description_generator = DatasetDescriptionGenerator(client=client, model_name="llama3")
+            _, description = description_generator.generate_description(
+                                dataset_sample=dataset_sample,
+                                dataset_profile=basic_profile,
+                                use_profile=True,
+                                semantic_profile=semantic_profile,
+                                use_semantic_profile=True,
+                                data_topic=None,
+                                use_topic=False
+                            )
+
+            res.success(True)
+            res.configuration(json.dumps(json.loads(description)))
+        except Exception as e:
+            res.success(False)
+            res.err_code(1)  # 0: No error || 1: Error
+            print(f"Error processing dataset path from request: {e}")
 
     else:
         res.node_id(req.node_id())
