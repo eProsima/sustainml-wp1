@@ -120,13 +120,13 @@ def task_callback(user_input, node_status, ml_model_metadata):
     global graph
     print (f"Received Task: {user_input.task_id().problem_id()},{user_input.task_id().iteration_id()}")
     client = Client(host='http://localhost:11434')
+    dataset_metadata = {}
 
     try:
         extra_data_bytes = user_input.extra_data()
         extra_data_str = ''.join(chr(b) for b in extra_data_bytes)
         extra_data_dict = json.loads(extra_data_str)
         accumulated_data = {}
-        dataset_metadata = {}
 
         if "model_restrains" in extra_data_dict:
             accumulated_data["model_restrains"] = extra_data_dict["model_restrains"]
