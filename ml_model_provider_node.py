@@ -23,7 +23,7 @@ import time
 import json
 
 from rdftool.ModelONNXCodebase import model
-from rdftool.rdfCode import load_graph, get_models_for_problem, get_models_for_problem_and_tag, get_problems, get_model_details, print_models
+from rdftool.rdfCode import load_graph, get_models_for_problem, get_models_for_problem_and_tag
 
 # Whether to go on spinning or interrupt
 running = False
@@ -31,12 +31,27 @@ running = False
 # Global variable of the graph
 graph = None
 
+
+# Load the list of unsupported
+def load_unsupported(file_path):
+    try:
+        with open(file_path, 'r') as f:
+            return [line.strip().lower() for line in f if line.strip()]
+    except Exception as e:
+        print(f"[WARN] Could not load unsupported list: {e}")
+        return []
+
+
+unsupported_models = load_unsupported(os.path.dirname(__file__) + "/unsupported_models.txt")
+
+
 # Signal handler
 def signal_handler(sig, frame):
     print("\nExiting")
     MLModelNode.terminate()
     global running
     running = False
+
 
 # User Callback implementation
 # Inputs: ml_model_metadata, app_requirements, hw_constraints, ml_model_baseline, hw_baseline, carbonfootprint_baseline
@@ -52,7 +67,7 @@ def task_callback(ml_model_metadata,
 
     # Callback implementation here
 
-    print (f"Received Task: {ml_model_metadata.task_id().problem_id()},{ml_model_metadata.task_id().iteration_id()}")
+    print(f"Received Task: {ml_model_metadata.task_id().problem_id()},{ml_model_metadata.task_id().iteration_id()}")
 
     try:
         chosen_model = None
@@ -96,7 +111,7 @@ def task_callback(ml_model_metadata,
             # Random Model is selected here. In the Final code there should be some sort of selection to choose between Possible Models
             for model_use in model_names:
                 # Some models can't be downloaded from HF, TODO: Works for all models
-                if "llama" in str(model_use).lower() or "mistral" in str(model_use).lower() or "bloom" in str(model_use).lower() or "t5" in str(model_use).lower():
+                if any(unsupported in str(model_use).lower() for unsupported in unsupported_models):
                     continue
                 if str(model_use) not in restrained_models:
                     chosen_model = model_use
@@ -112,6 +127,10 @@ def task_callback(ml_model_metadata,
         onnx_path = model(chosen_model)     # TODO - Further development needed
         ml_model.model(chosen_model)
         ml_model.model_path(onnx_path)
+        # Add unsupported_models information to extra_data in json format
+        extra_data = {"unsupported_models": unsupported_models}
+        encoded_data = json.dumps(extra_data).encode("utf-8")
+        ml_model.extra_data(encoded_data)
 
     except Exception as e:
         print(f"Failed to determine ML model for task {ml_model_metadata.task_id()}: {e}.")
@@ -121,6 +140,7 @@ def task_callback(ml_model_metadata,
         error_info = {"error": error_message}
         encoded_error = json.dumps(error_info).encode("utf-8")
         ml_model.extra_data(encoded_error)
+
 
 # User Configuration Callback implementation
 # Inputs: req
@@ -153,7 +173,7 @@ def configuration_callback(req, res):
                 res.success(True)
                 res.err_code(0)  # 0: No error || 1: Error
 
-            print(f"Models for {goal}: {sorted_models}")    #debug
+            print(f"Models for {goal}: {sorted_models}")  # debug
             res.configuration(json.dumps(dict(models=sorted_models)))
 
         except Exception as e:
@@ -179,6 +199,7 @@ def run():
     global running
     running = True
     node.spin()
+
 
 # Call main in program execution
 if __name__ == '__main__':
