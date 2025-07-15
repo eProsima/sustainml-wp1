@@ -33,7 +33,7 @@ graph = None
 
 
 # Load the list of unsupported
-def load_unsupported(file_path):
+def load_unsupported_models(file_path):
     try:
         with open(file_path, 'r') as f:
             return [line.strip().lower() for line in f if line.strip()]
@@ -42,7 +42,7 @@ def load_unsupported(file_path):
         return []
 
 
-unsupported_models = load_unsupported(os.path.dirname(__file__) + "/unsupported_models.txt")
+unsupported_models = load_unsupported_models(os.path.dirname(__file__) + "/unsupported_models.txt")
 
 
 # Signal handler
