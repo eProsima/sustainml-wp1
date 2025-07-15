@@ -125,7 +125,12 @@ def task_callback(user_input, node_status, ml_model_metadata):
     try:
         extra_data_bytes = user_input.extra_data()
         extra_data_str = ''.join(chr(b) for b in extra_data_bytes)
-        extra_data_dict = json.loads(extra_data_str)
+        try:
+            extra_data_dict = json.loads(extra_data_str)
+        except json.JSONDecodeError:
+            print("[WARN] In model_metadata node extra_data JSON is not valid.")
+            extra_data_dict = {}
+
         accumulated_data = {}
 
         if "model_restrains" in extra_data_dict:
