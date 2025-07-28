@@ -20,7 +20,8 @@ annoy_index = AnnoyIndex(1024, 'angular')
 annoy_index.load(os.path.join(BASE_DIR, 'models_index.ann'))
 
 # Load sentence transformer for semantic search
-sentence_model = SentenceTransformer('BAAI/bge-large-en', device='cuda')
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+sentence_model = SentenceTransformer('BAAI/bge-large-en', device=device)
 
 # Neo4j Configuration
 NEO4J_URI = "bolt://localhost:7687"
