@@ -150,7 +150,7 @@ def task_callback(user_input, node_status, ml_model_metadata):
             ml_model_metadata.ml_model_metadata().append(goal)
             print(f"Skipped ML Model Metadata. ML Goal selected as input: {goal}")
             return
-        
+
         if "dataset_metadata_description" in extra_data_dict:
             dataset_metadata["description"] = extra_data_dict["dataset_metadata_description"]
 

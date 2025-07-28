@@ -25,6 +25,8 @@ import json
 from rdftool.ModelONNXCodebase import model
 from rdftool.rdfCode import load_graph, get_models_for_problem, get_models_for_problem_and_tag
 
+from rag.rag_backend import answer_question
+
 # Whether to go on spinning or interrupt
 running = False
 
@@ -95,6 +97,14 @@ def task_callback(ml_model_metadata,
 
         if chosen_model is None:
             metadata = ml_model_metadata.ml_model_metadata()[0]
+
+            # Choose model with the RAG based on the goal selected and the knowledge of the graph. WIP
+            # chosen_model = answer_question(
+            #     f"What is the best ML model for the task {metadata}. "
+            #     f"Answer with just the full Hugging Face name of the model."
+            #     f"The format like this one that follows 'openai-community/gpt2-large'."
+            #     f"Give me the name of the model, nothing else."
+            # )
 
             # Model selection and information retrieval
             global graph
