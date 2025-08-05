@@ -1,379 +1,360 @@
-from rdflib import Graph, Namespace, RDF, Literal
-from rdflib.namespace import XSD
+from neo4j import GraphDatabase
 
-def load_graph(file_path):
-    ###########################################################
-    ### load and parse the graph file:                      ###
-    ###########################################################
-    g = Graph()
-    g.parse(file_path, format="turtle")
-    return g
+# Neo4j Configuration
+NEO4J_URI = "bolt://localhost:7687"
+NEO4J_USER = "neo4j"
+NEO4J_PASSWORD = "12345678"
 
-def get_cover_tags(graph):
+# Connect to Neo4j
+neo4j_driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
+
+def load_graph():
+    ###########################################################
+    ### make sure neo4j graph is loaded:                    ###
+    ###########################################################
+    try:
+        with neo4j_driver.session() as session:
+            result = session.run("MATCH (n) RETURN count(n) as node_count LIMIT 1")
+            count = result.single()["node_count"]
+            # print(f"Neo4j connected successfully. Total nodes: {count}")
+        return True
+    except Exception as e:
+        # print(f"Error connecting to Neo4j: {e}")
+        return False
+
+def execute_cypher_query(cypher_query):
+    ###########################################################
+    ### executes the Cypher query on the Neo4j database:    ###
+    ###########################################################
+    with neo4j_driver.session() as session:
+        results = session.run(cypher_query)
+        data = [dict(record) for record in results]
+        print(f"Retrieved {len(data)} records from Neo4j")
+        return data
+
+def get_cover_tags():
     ###########################################################
     ### get cover tags (modalities) of machine learning:    ###
     ###########################################################
-    query = """
-    PREFIX conn: <http://example.org/conn/>
-    SELECT ?coverTag
-    WHERE {
-      ?coverTag a conn:CoverTag .
-    }
+    cypher_query = """
+    MATCH (ct:CoverTag)
+    RETURN ct.name AS coverTag
+    ORDER BY ct.name
     """
-    results = graph.query(query)
-    cover_tags = [row[0] for row in results]
+
+    results = execute_cypher_query(cypher_query)
+    cover_tags = [record["coverTag"] for record in results]
     return cover_tags
 
-def get_problems(graph):
+def get_problems():
     ###########################################################
     ### get types of machine learning problem:              ###
     ###########################################################
-    query = """
-    PREFIX conn: <http://example.org/conn/>
-    SELECT ?problem
-    WHERE {
-      ?problem a conn:Problem .
-    }
+    cypher_query = """
+    MATCH (p:Problem)
+    RETURN p.name AS problem
+    ORDER BY p.name
     """
-    results = graph.query(query)
-    problems = [row[0] for row in results]
+
+    results = execute_cypher_query(cypher_query)
+    problems = [record["problem"] for record in results]
     return problems
 
-def get_problems_for_cover_tag(graph, cover_tag):
+def get_problems_for_cover_tag(cover_tag):
     ###########################################################
     ### get problem type from modality:                     ###
     ###########################################################
-    CONN = Namespace("http://example.org/conn/")
-    cover_tag_literal = Literal(cover_tag, datatype=XSD.string)
-
-    query = """
-    PREFIX conn: <http://example.org/conn/>
-    PREFIX problem: <http://example.org/problem/>
-    SELECT ?problem
-    WHERE {
-      ?problem a conn:Problem .
-      ?problem conn:hasCoverTag ?coverTag .
-      FILTER (?coverTag = ?cover_tag)
-    }
+    cypher_query = """
+    MATCH (ct:CoverTag {name: $cover_tag})
+          <-[:HAS_COVER_TAG]-(m:Model)
+          -[:HAS_PROBLEM]->(p:Problem)
+    RETURN DISTINCT p.name AS problem
+    ORDER BY p.name
     """
 
-    results = graph.query(query, initBindings={'cover_tag': cover_tag_literal})
-    problems = [row[0] for row in results]
+    with neo4j_driver.session() as session:
+        results = session.run(cypher_query, cover_tag=cover_tag)
+        problems = [record["problem"] for record in results]
+
     return problems
 
-def get_modalities_input(graph):
+def get_modalities_input():
     ###########################################################
     ### get modalities inputs machine learning:             ###
     ###########################################################
-    query = """
-    PREFIX modality: <http://example.org/modality/>
-    PREFIX conn: <http://example.org/conn/>
-
-    SELECT DISTINCT ?modality
-    WHERE {
-        ?type modality:hasInput ?modality ;
-    }
+    cypher_query = """
+    MATCH (p:Problem)-[:HAS_INPUT]->(m:Modality)
+    RETURN DISTINCT m.name AS modality
+    ORDER BY m.name
     """
-    results = graph.query(query)
-    modalities_input = [row[0] for row in results]
+
+    results = execute_cypher_query(cypher_query)
+    modalities_input = [record["modality"] for record in results]
     return modalities_input
 
-def get_modalities_output(graph):
+def get_modalities_output():
     ###########################################################
     ### get modalities outputs machine learning:            ###
     ###########################################################
-    query = """
-    PREFIX conn: <http://example.org/conn/>
-    SELECT DISTINCT ?modality
-    WHERE {
-        ?type modality:hasOutput ?modality .
-    }
+    cypher_query = """
+    MATCH (p:Problem)-[:HAS_OUTPUT]->(m:Modality)
+    RETURN DISTINCT m.name AS modality
+    ORDER BY m.name
     """
-    results = graph.query(query)
-    modalities_output = [row[0] for row in results]
+
+    results = execute_cypher_query(cypher_query)
+    modalities_output = [record["modality"] for record in results]
     return modalities_output
 
-def get_all_metrics(graph):
+def get_all_metrics():
     ###########################################################
     ### get all types of metrics:                           ###
     ###########################################################
-    query = """
-    PREFIX conn: <http://example.org/conn/>  # Add conn prefix
-    PREFIX metric: <http://example.org/metric/>
-    SELECT DISTINCT ?metric
-    WHERE {
-        ?metric a metric:Metric.
-    }
+    cypher_query = """
+    MATCH (metric:Metric)
+    RETURN DISTINCT metric.name AS metric
+    ORDER BY metric.name
     """
-    results = graph.query(query)
-    metrics = {str(metric[0]) for metric in results}
+
+    results = execute_cypher_query(cypher_query)
+    metrics = {record["metric"] for record in results}
     return metrics
 
 
-def find_metrics_by_model(graph, model_name):
+def find_metrics_by_model(model_name):
     ###########################################################
     ### get metrics for a model:                            ###
     ###########################################################
-    query = f"""
-    PREFIX metric: <http://example.org/metric/>
-    PREFIX conn: <http://example.org/conn/>
-
-    SELECT DISTINCT ?metric
-    WHERE {{
-        ?model a conn:Model ;
-               conn:model_name "{model_name}"^^xsd:string ;
-               metric:hasMetric ?metric .
-    }}
+    cypher_query = """
+    MATCH (m:Model {name: $model_name})-[:EVALUATED_BY]-(metric:Metric)
+    RETURN DISTINCT metric.name AS metric
+    ORDER BY metric.name
     """
-    results = graph.query(query)
 
+    with neo4j_driver.session() as session:
+        results = session.run(cypher_query, model_name=model_name)
+        metrics = [record["metric"] for record in results]
 
-    metrics = [str(row[0]) for row in results]
     return metrics
 
-def search_metrics_by_cover_tag(graph, cover_tag):
+def search_metrics_by_cover_tag(cover_tag):
     ###########################################################
     ### get metrics for a specific cover tag:               ###
     ###########################################################
-    problems = get_problems_for_cover_tag(graph, cover_tag)
+    problems = get_problems_for_cover_tag(cover_tag)
     metrics_for_all_problems = {}
+
     for problem in problems:
-        models = get_models_for_problem(graph, problem)
+        models = get_models_for_problem(problem)
         models_with_metrics = {}
 
-        for model,downloads in models:
-
-            metrics = find_metrics_by_model(graph, model)
+        for model, downloads in models:
+            metrics = find_metrics_by_model(model)
             models_with_metrics[model] = metrics
 
         metrics_for_all_problems[problem] = models_with_metrics
 
     return metrics_for_all_problems
 
-def search_metrics_by_input_modalities(graph, input_modality):
+def search_metrics_by_input_modalities(input_modality):
     ###########################################################
     ### get metrics for a input modality:                  ###
     ###########################################################
-    problems = find_problem_by_input_modality(graph, input_modality)
+    problems = find_problem_by_input_modality(input_modality)
     metrics_for_all_problems = {}
 
     for problem in problems:
-        models = get_models_for_problem(graph, problem)
+        models = get_models_for_problem(problem)
         models_with_metrics = {}
 
-        for model,downloads in models:
-            metrics = find_metrics_by_model(graph, model)
+        for model, downloads in models:
+            metrics = find_metrics_by_model(model)
             models_with_metrics[model] = metrics
 
         metrics_for_all_problems[problem] = models_with_metrics
 
     return metrics_for_all_problems
 
-def search_metrics_by_modalities(graph, input_modality, output_modality):
+def search_metrics_by_modalities(input_modality, output_modality):
     ###########################################################
     ### get metrics for a modality:                         ###
     ###########################################################
-    problems = find_problem_by_modalities(graph, input_modality, output_modality)
+    problems = find_problem_by_modalities(input_modality, output_modality)
     metrics_for_all_problems = {}
 
     for problem in problems:
-        models = get_models_for_problem(graph, problem)
+        models = get_models_for_problem(problem)
         models_with_metrics = {}
 
-        for model,downloads in models:
-            metrics = find_metrics_by_model(graph, model)
+        for model, downloads in models:
+            metrics = find_metrics_by_model(model)
             models_with_metrics[model] = metrics
 
         metrics_for_all_problems[problem] = models_with_metrics
 
     return metrics_for_all_problems
 
-def get_models_with_higher_score(graph, metric_name, dataset, score_threshold):
+def get_models_with_higher_score(metric_name, dataset, score_threshold):
     ###########################################################
     ### get models with the higher scores:                  ###
     ###########################################################
-    query = """
-    PREFIX conn: <http://example.org/conn/>
-    PREFIX metric: <http://example.org/metric/>
-    SELECT ?model
-    WHERE {
-        ?model a conn:Model .
-        ?metric a metric:Metric .
-        ?model metric:hasMetric ?metric .
-        ?metric metric:metricName ?metricName .
-        ?metric metric:onDataset ?dataset .
-        ?metric metric:hasScore ?score .
-        FILTER (xsd:float(?score) > ?score_threshold)
-    }
+    cypher_query = """
+    MATCH (m:Model)-[:EVALUATED_BY]-(metric:Metric)-[:ON_DATASET]->(d:Dataset {name: $dataset})
+    WHERE metric.name = $metric_name
+      AND metric.score > $score_threshold
+    RETURN DISTINCT m.name AS model
+    ORDER BY metric.score DESC
     """
 
-    # convert score to literal
-    score_threshold_literal = Literal(score_threshold, datatype=XSD.float)
+    with neo4j_driver.session() as session:
+        results = session.run(cypher_query,
+                            metric_name=metric_name,
+                            dataset=dataset,
+                            score_threshold=float(score_threshold))
+        models = [record["model"] for record in results]
 
-    results = graph.query(
-        query,
-        initBindings={
-            'metricName': Literal(metric_name),
-            'dataset': Literal(dataset),
-            'score_threshold': score_threshold_literal
-        }
-    )
-
-    models = [str(row[0]) for row in results]
     return models
 
-def find_problem_by_modalities(graph, input_modality, output_modality):
+def find_problem_by_modalities(input_modality, output_modality):
     ###########################################################
     ### get problem from modalities:                        ###
     ###########################################################
-    query = f"""
-    PREFIX modality: <http://example.org/modality/>
-    PREFIX conn: <http://example.org/conn/>
-
-    SELECT DISTINCT ?problem
-    WHERE {{
-        ?problem a conn:Problem ;
-                 modality:hasInput "{input_modality}"^^xsd:string ;
-                 modality:hasOutput "{output_modality}"^^xsd:string .
-    }}
+    cypher_query = """
+    MATCH (p:Problem)-[:HAS_INPUT]->(input:Modality)
+    MATCH (p)-[:HAS_OUTPUT]->(output:Modality)
+    WHERE input.name = $input_modality AND output.name = $output_modality
+    RETURN DISTINCT p.name AS problem
+    ORDER BY p.name
     """
-    results = graph.query(query)
 
-    problems = [str(row[0]) for row in results]
+    with neo4j_driver.session() as session:
+        results = session.run(cypher_query,
+                            input_modality=input_modality,
+                            output_modality=output_modality)
+        problems = [record["problem"] for record in results]
+
     return problems
 
-def find_problem_by_input_modality(graph, input_modality):
+def find_problem_by_input_modality(input_modality):
     ###########################################################
     ### get problem from input_modality:                    ###
     ###########################################################
-    query = f"""
-    PREFIX modality: <http://example.org/modality/>
-    PREFIX conn: <http://example.org/conn/>
-
-    SELECT DISTINCT ?problem
-    WHERE {{
-        ?problem a conn:Problem ;
-               modality:hasInput "{input_modality}"^^xsd:string .
-    }}
+    cypher_query = """
+    MATCH (p:Problem)-[:HAS_INPUT]->(input:Modality)
+    WHERE input.name = $input_modality
+    RETURN DISTINCT p.name AS problem
+    ORDER BY p.name
     """
-    results = graph.query(query)
 
-    problems = [str(row[0]) for row in results]
+    with neo4j_driver.session() as session:
+        results = session.run(cypher_query, input_modality=input_modality)
+        problems = [record["problem"] for record in results]
+
     return problems
 
-def get_models_with_max_size(graph, max_parameters=None):
+def get_models_with_max_size(max_parameters=None):
     ###########################################################
     ### get models threshold by the size:                   ###
     ###########################################################
-    query = """
-    PREFIX conn: <http://example.org/conn/>
-    SELECT ?model
-    WHERE {
-        ?model a conn:Model .
-        ?model conn:parameters ?parameters .
-        FILTER (xsd:integer(?parameters) >= ?min_parameters)
-        """
+    cypher_query = """
+    MATCH (m:Model)
+    WHERE m.parameters IS NOT NULL
+    """
 
     if max_parameters is not None:
-        query += "FILTER (xsd:integer(?parameters) <= ?max_parameters)"
+        cypher_query += " AND m.parameters <= $max_parameters"
 
-    query += "}"  # Close the WHERE clause
+    cypher_query += """
+    RETURN m.name AS model
+    ORDER BY m.parameters DESC
+    """
 
-    max_parameters_literal = Literal(max_parameters, datatype=XSD.integer)
+    with neo4j_driver.session() as session:
+        if max_parameters is not None:
+            results = session.run(cypher_query, max_parameters=max_parameters)
+        else:
+            results = session.run(cypher_query)
+        models = [record["model"] for record in results]
 
-    results = graph.query(query, initBindings={'max_parameters': max_parameters_literal})
-    models = [str(row[0]) for row in results]
     return models
 
-def get_models_for_problem(graph, problem_literal_text):
+def get_models_for_problem(problem_literal_text):
     ###########################################################
     ### get models with correct machine learning goal:      ###
     ###########################################################
-    problem_literal = Literal(problem_literal_text, datatype=XSD.string)
-
-    query = """
-    PREFIX conn: <http://example.org/conn/>
-    PREFIX model: <http://example.org/model/>
-    SELECT ?model ?downloads
-    WHERE {
-      ?model a conn:Model .
-      ?model conn:hasProblem ?problem .
-      ?model conn:downloads ?downloads .
-      FILTER (?problem = ?problem_literal)
-    }
-    ORDER BY DESC(?downloads)
+    cypher_query = """
+    MATCH (m:Model)-[:HAS_PROBLEM]->(p:Problem)
+    WHERE p.name = $problem_name
+    RETURN m.name AS model, m.downloads AS downloads
+    ORDER BY m.downloads DESC
     """
 
-    results = graph.query(query, initBindings={'problem_literal': problem_literal})
+    with neo4j_driver.session() as session:
+        results = session.run(cypher_query, problem_name=problem_literal_text)
+        models = [(record["model"], record["downloads"]) for record in results]
 
-    models = [(row[0], row[1]) for row in results]
     return models
 
-def get_models_for_problem_and_tag(graph, problem_literal_text, tag):
+def get_models_for_problem_and_tag(problem_literal_text, tag):
     ###########################################################
     ### get models with correct machine learning goal and   ###
     ### with the specified tag (e.g., transformers)         ###
     ###########################################################
-    problem_literal = Literal(problem_literal_text, datatype=XSD.string)
-    tag_literal = Literal(tag, datatype=XSD.string)
-
-    query = """
-    PREFIX conn: <http://example.org/conn/>
-    PREFIX model: <http://example.org/model/>
-    SELECT ?model ?downloads
-    WHERE {
-      ?model a conn:Model .
-      ?model conn:hasProblem ?problem .
-      ?model conn:hasTag ?modelTag .
-      ?model conn:downloads ?downloads .
-      FILTER (?problem = ?problem_literal && ?modelTag = ?tag_literal)
-    }
-    ORDER BY DESC(?downloads)
+    cypher_query = """
+    MATCH (m:Model)-[:HAS_PROBLEM]->(p:Problem)
+    MATCH (m)-[:HAS_TAG]->(t:Tag)
+    WHERE p.name = $problem_name AND t.name = $tag_name
+    RETURN m.name AS model, m.downloads AS downloads
+    ORDER BY m.downloads DESC
     """
 
-    results = graph.query(query, initBindings={'problem_literal': problem_literal, 'tag_literal': tag_literal})
-    models = [(row[0], row[1]) for row in results]
+    with neo4j_driver.session() as session:
+        results = session.run(cypher_query,
+                            problem_name=problem_literal_text,
+                            tag_name=tag)
+        models = [(record["model"], record["downloads"]) for record in results]
+
     return models
 
-def get_model_details(graph, model_name):
+def get_model_details(model_name):
     ###########################################################
     ### get info about model                                ###
     ###########################################################
-    model_literal = Literal(model_name, datatype=XSD.string)
-
-    query = """
-    PREFIX conn: <http://example.org/conn/>
-    PREFIX model: <http://example.org/model/>
-    PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
-    SELECT ?model ?id ?name ?problem ?coverTag ?library ?downloads ?likes ?lastModified
-    WHERE {
-      ?model a conn:Model .
-      ?model conn:model_name ?name .
-      ?model conn:model_id ?id .
-      ?model conn:hasProblem ?problem .
-      ?model conn:hasCoverTag ?coverTag .
-      ?model conn:usesLibrary ?library .
-      ?model conn:downloads ?downloads .
-      ?model conn:likes ?likes .
-      ?model conn:lastModified ?lastModified .
-      FILTER (?name = ?model_literal)
-    }
+    cypher_query = """
+    MATCH (m:Model)
+    WHERE m.name = $model_name
+    OPTIONAL MATCH (m)-[:HAS_PROBLEM]->(p:Problem)
+    OPTIONAL MATCH (m)-[:HAS_COVER_TAG]->(ct:CoverTag)
+    OPTIONAL MATCH (m)-[:USES_LIBRARY]->(l:Library)
+    RETURN
+      m.name AS name,
+      m.id AS id,
+      p.name AS problem,
+      ct.name AS coverTag,
+      l.name AS library,
+      m.downloads AS downloads,
+      m.likes AS likes,
+      m.lastModified AS lastModified
     """
 
-    results = graph.query(query, initBindings={'model_literal': model_literal})
-    details = {}
-    for row in results:
-        details = {
-            'model_uri': row[0],
-            'id': row[1],
-            'name': row[2],
-            'problem': row[3],
-            'coverTag': row[4],
-            'library': row[5],
-            'downloads': row[6],
-            'likes': row[7],
-            'lastModified': row[8]
-        }
+    with neo4j_driver.session() as session:
+        results = session.run(cypher_query, model_name=model_name)
+        record = results.single()
+
+        if record:
+            details = {
+                'name': record["name"],
+                'id': record["id"],
+                'problem': record["problem"],
+                'coverTag': record["coverTag"],
+                'library': record["library"],
+                'downloads': record["downloads"],
+                'likes': record["likes"],
+                'lastModified': record["lastModified"]
+            }
+        else:
+            details = {}
+
     return details
 
 def print_results(literals, label):
