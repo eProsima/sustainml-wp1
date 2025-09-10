@@ -8,7 +8,7 @@ from sentence_transformers import SentenceTransformer
 from annoy import AnnoyIndex
 from neo4j import GraphDatabase
 from ollama import Client
-
+import random
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -28,80 +28,47 @@ NEO4J_URI = "bolt://localhost:7687"
 NEO4J_USER = "neo4j"
 NEO4J_PASSWORD = "12345678"
 
-MODEL = "llama3"
+MODEL = "mistral-small"
 
 # Connect to Neo4j
 neo4j_driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
 
 client = Client(host='http://localhost:11434')
 
-
-def search_semantic(query, top_k=100):
+def search_semantic(query, top_k=200, sample_k=30):
     """Performs semantic search on the Annoy index."""
     print("Search Semantic")
     query_embedding = sentence_model.encode([query], convert_to_tensor=True).cpu().detach().numpy()[0]
     nearest_neighbors = annoy_index.get_nns_by_vector(query_embedding, top_k)
+    sampled = random.sample(nearest_neighbors, min(sample_k, len(nearest_neighbors)))
 
     results = []
-    for idx in nearest_neighbors:
+    for idx in sampled:
         results.append(metadata[idx])
     print("Neighbors results: ", results)  # debug
     return results
 
-
-def generate_cypher_query(semantic_results):
-    """Generates a Cypher query based on retrieved metadata."""
-    print("generate Cypher")
-    if not semantic_results:
-        return None
-
-    relevant_models = [res["name"] for res in semantic_results]
-
-    cypher_query = f"""
-    WITH {relevant_models} AS model_names
-    MATCH (m:Model)
-      WHERE m.name IN model_names
-    OPTIONAL MATCH (m)-[:HAS_PROBLEM]->(p:Problem)
-    OPTIONAL MATCH (m)-[:USES_LIBRARY]->(l:Library)
-    OPTIONAL MATCH (m)-[:HAS_TAG]->(t:Tag)
-    OPTIONAL MATCH (m)-[:HAS_COVER_TAG]->(ct:CoverTag)
-    RETURN
-      m.name         AS name,
-      m.id           AS modelId,
-      m.downloads    AS downloads,
-      m.likes        AS likes,
-      m.lastModified AS lastModified,
-      p.name         AS problem,
-      l.name         AS library,
-      collect(DISTINCT t.name)  AS tags,
-      collect(DISTINCT ct.name) AS coverTags
-    LIMIT 100
-    """
-    return cypher_query
-
-
-def execute_cypher_query(cypher_query):
-    """Executes the Cypher query on the Neo4j database."""
-    print("Execute cypher")
-    with neo4j_driver.session() as session:
-        results = session.run(cypher_query)
-        data = [dict(record) for record in results]
-        print(f"Data retrieve from graph with neighbors: {data}")  # debug
-        return data
-
-
 def generate_natural_answer(knowledge, user_question):
     """Generates a natural language response using the LLM."""
     print("Generate natural answer")
+    template = """
+    {
+        "model_name": "The name of the model that best fits the user's question with the given knowledge."
+    }
+    """
     print(f"Full Knowledge: {knowledge}")  # debug
     final_prompt = f"""
     Based on the retrieved knowledge:
     {knowledge}
 
-    Answer the following question: {user_question}
+    Answer the following question: {user_question}.
+    The format of the Hugging Face name of the model must be like this one that follows: 'openai-community/gpt2-large'.
+    Only output one model name in JSON format.
+    For the json use the following template {template}. 
+    Do not add any sentence before and after.
     """
     messages = [
-        {"role": "system", "content": "You are an extremely concise assistant. If the user asks for just the model name, output exactly the name and nothing else. In other cases, give a one‐sentence answer."},
+        {"role": "system", "content": "You are an extremely concise assistant. Use only the provided context information to form your response. If an answer can not be found within the provided context information respond with 'The answer could not be found in the provided context."},
         {"role": "user", "content": final_prompt}
     ]
 
@@ -111,21 +78,16 @@ def generate_natural_answer(knowledge, user_question):
         options={"temperature": 0.0}
     )["message"]["content"].strip()
 
-
 def answer_question(user_question):
     """Handles user questions by retrieving search results."""
 
     # TBD category
-    semantic_results = search_semantic(user_question)
-    cypher_query = generate_cypher_query(semantic_results)
-
-    if cypher_query:
-        graph_results = execute_cypher_query(cypher_query)
-        knowledge = semantic_results + graph_results
-    else:
-        knowledge = semantic_results
+    knowledge = search_semantic(user_question)
 
     answer = generate_natural_answer(knowledge, user_question)
+    clean = answer.strip().removeprefix("```json").removesuffix("```").strip().replace("'", '"')
+    data = json.loads(clean)
+    answer = data["model_name"]
     print(f"Response: {answer}")  # debug
 
     return answer

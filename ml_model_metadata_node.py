@@ -141,7 +141,8 @@ def task_callback(user_input, node_status, ml_model_metadata):
 
         if "type" in extra_data_dict and extra_data_dict["type"] != "":
             accumulated_data["type"] = extra_data_dict["type"]
-
+        problem = user_input.problem_short_description()
+        accumulated_data["problem_short_description"] = problem
         encoded_data = json.dumps(accumulated_data).encode("utf-8")
         ml_model_metadata.extra_data(encoded_data)
 

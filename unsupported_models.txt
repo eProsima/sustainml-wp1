@@ -4,3 +4,4 @@ qwen
 bloom
 t5
 phi3
+idefics2

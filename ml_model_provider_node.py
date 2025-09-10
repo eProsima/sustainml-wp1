@@ -95,42 +95,18 @@ def task_callback(ml_model_metadata,
                 chosen_model = extra_data_dict["model_selected"]
                 print("Model already selected: ", chosen_model)
 
+            problem_short_description = extra_data_dict["problem_short_description"]
+
+        metadata = ml_model_metadata.ml_model_metadata()[0]
+        
         if chosen_model is None:
-            metadata = ml_model_metadata.ml_model_metadata()[0]
+            print(f"Problem short description: {problem_short_description}")
 
-            # Choose model with the RAG based on the goal selected and the knowledge of the graph. WIP
-            # chosen_model = answer_question(
-            #     f"What is the best ML model for the task {metadata}. "
-            #     f"Answer with just the full Hugging Face name of the model."
-            #     f"The format like this one that follows 'openai-community/gpt2-large'."
-            #     f"Give me the name of the model, nothing else."
-            # )
-
-            # Model selection and information retrieval
-            global graph
-            if type is not None:
-                print(f"Limiting search to models with tag: {type}")
-                suggested_models = get_models_for_problem_and_tag(graph, metadata, type)
-            else:
-                suggested_models = get_models_for_problem(graph, metadata)
-
-            # model_info = get_model_details(graph, suggested_models)
-            # model_names = [info['name'] for info in model_info]
-            model_names = [model[0] for model in suggested_models]
-
-            # Random Model is selected here. In the Final code there should be some sort of selection to choose between Possible Models
-            for model_use in model_names:
-                # Some models can't be downloaded from HF, TODO: Works for all models
-                if any(unsupported in str(model_use).lower() for unsupported in unsupported_models):
-                    continue
-                if str(model_use) not in restrained_models:
-                    chosen_model = model_use
-                    break
-                else:
-                    print(f"Chosen model: {model_use} is restrained. The restrained models are {restrained_models}. Choosing the next model.")
-            else:
-                raise Exception("No valid model could be selected.")
-
+            # Choose model with the RAG based on the goal selected and the knowledge of the graph.
+            chosen_model = answer_question(
+                 f"Task {metadata} with problem description: {problem_short_description}?"
+             )
+            
         print(f"ML Model chosen: {chosen_model}")
 
         # Generate model code and keywords
