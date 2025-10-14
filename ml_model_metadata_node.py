@@ -38,9 +38,6 @@ from ollama import Client
 # Whether to go on spinning or interrupt
 running = False
 
-# Global variable of the graph
-graph = None
-
 unsupported_goals = [
                 "any-to-any",
                 "audio-classification",
@@ -117,7 +114,6 @@ def get_llm_response(client, model_version, problem_definition, prompt):
 def task_callback(user_input, node_status, ml_model_metadata):
 
     # Callback implementation here
-    global graph
     print (f"Received Task: {user_input.task_id().problem_id()},{user_input.task_id().iteration_id()}")
     client = Client(host='http://localhost:11434')
     dataset_metadata = {}
@@ -173,7 +169,7 @@ def task_callback(user_input, node_status, ml_model_metadata):
 
     # Retrieve Possible Ml Goals from graph
     try:
-        raw_goals = get_problems(graph)
+        raw_goals = get_problems()
         inputs = [str(g) for g in raw_goals]
         goals = [goal for goal in inputs if goal not in unsupported_goals]
     except Exception as e:
@@ -232,13 +228,12 @@ def task_callback(user_input, node_status, ml_model_metadata):
 def configuration_callback(req, res):
 
     # Callback for configuration implementation here
-    global graph
     if req.configuration() == "modality":
         res.node_id(req.node_id())
         res.transaction_id(req.transaction_id())
         try:
             # Retrieve Possible Ml Goals from graph
-            raw_modality = get_cover_tags(graph)
+            raw_modality = get_cover_tags()
             inputs = [str(m) for m in raw_modality]
             unsupported_modality = [
                 "audio",
@@ -259,7 +254,7 @@ def configuration_callback(req, res):
                 res.err_code(0) # 0: No error || 1: Error
             print(f"Available Modalities: {sorted_modalities}") #debug
 
-            raw_goals = get_problems(graph)
+            raw_goals = get_problems()
             inputs = [str(g) for g in raw_goals]
             supported_goals = [goal for goal in inputs if goal not in unsupported_goals]
             sorted_goals = ', '.join(sorted(supported_goals))  # TODO: fix overflow bug sending goals response to request
@@ -286,9 +281,9 @@ def configuration_callback(req, res):
         res.transaction_id(req.transaction_id())
         try:
             # Retrieve Possible Ml Inputs and Outputs modalities
-            inputs = get_modalities_input(graph)
+            inputs = get_modalities_input()
             sorted_inputs = ', '.join(sorted(inputs))
-            outputs = get_modalities_output(graph)
+            outputs = get_modalities_output()
             sorted_outputs = ', '.join(sorted(outputs))
 
             if sorted_inputs == "" or sorted_outputs == "":
@@ -324,10 +319,10 @@ def configuration_callback(req, res):
                 if len(parts) >= 2:
                     cover_tag = parts[0].strip()
                     tag = parts[1].strip()
-                    metrics = search_metrics_by_cover_tag(graph, cover_tag)
+                    metrics = search_metrics_by_cover_tag(cover_tag)
                 else:
                     cover_tag = req_type_values.strip()
-                    metrics = search_metrics_by_cover_tag(graph, cover_tag)
+                    metrics = search_metrics_by_cover_tag(cover_tag)
 
                 all_metrics = []
                 for problem, metrics_list in metrics.items():
@@ -345,7 +340,7 @@ def configuration_callback(req, res):
                 input_modality, output_modality = req_type_values.split(",", 1)
                 input_modality = input_modality.strip()
                 output_modality = output_modality.strip()
-                metrics = search_metrics_by_modalities(graph, input_modality, output_modality)
+                metrics = search_metrics_by_modalities(input_modality, output_modality)
                 all_metrics = []
                 for problem, metrics_list in metrics.items():
                     for model, m in metrics_list.items():
@@ -363,16 +358,16 @@ def configuration_callback(req, res):
                 if len(parts) >= 2:
                     problem_name = parts[0].strip()
                     tag = parts[1].strip()
-                    models = get_models_for_problem_and_tag(graph, problem_name, tag)
+                    models = get_models_for_problem_and_tag(problem_name, tag)
                 else:
                     problem_name = req_type_values.strip()
-                    models = get_models_for_problem(graph, problem_name)
+                    models = get_models_for_problem(problem_name)
 
                   # Pass problem name and tag
                 all_metrics = []
 
                 for model,downloads in models:
-                    metrics = find_metrics_by_model(graph, model)
+                    metrics = find_metrics_by_model(model)
                     if isinstance(metrics, list):
                         all_metrics.extend(metrics)
                     else:
@@ -381,7 +376,7 @@ def configuration_callback(req, res):
                 sorted_metrics = ', '.join(sorted(all_metrics))
 
             elif metric_req_type == "all":
-                metrics = get_all_metrics(graph)
+                metrics = get_all_metrics()
                 sorted_metrics = ', '.join(sorted(metrics))
 
             else:
@@ -409,7 +404,7 @@ def configuration_callback(req, res):
 
         try:
             model = req.configuration()[len("mode_info, "):]
-            details = get_model_details(graph, model)
+            details = get_model_details(model)
 
             if not details:
                 res.success(False)
@@ -431,7 +426,7 @@ def configuration_callback(req, res):
 
         try:
             modality = req.configuration()[len("problem_from_modality, "):]
-            goals = get_problems_for_cover_tag(graph, modality)
+            goals = get_problems_for_cover_tag(modality)
             sorted_goals = ', '.join(sorted(goals))
 
             if not sorted_goals:
@@ -508,8 +503,16 @@ def configuration_callback(req, res):
 
 # Main workflow routine
 def run():
-    global graph
-    graph = load_graph(os.path.dirname(__file__)+'/graph_v2.ttl')
+    start_time = time.time()
+    loaded = False
+    while time.time() - start_time < 5:
+        if load_graph():
+            loaded = True
+            break
+        time.sleep(0.1)
+    if not loaded:
+        print("[Error] Graph not available")
+        exit(1)
     node = MLModelMetadataNode(callback=task_callback, service_callback=configuration_callback)
     global running
     running = True

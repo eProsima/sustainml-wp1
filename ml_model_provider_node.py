@@ -30,9 +30,6 @@ from rag.rag_backend import answer_question
 # Whether to go on spinning or interrupt
 running = False
 
-# Global variable of the graph
-graph = None
-
 
 # Load the list of unsupported
 def load_unsupported_models(file_path):
@@ -101,7 +98,7 @@ def task_callback(ml_model_metadata,
         
         if chosen_model is None:
             print(f"Problem short description: {problem_short_description}")
-
+            
             # Choose model with the RAG based on the goal selected and the knowledge of the graph.
             chosen_model = answer_question(
                  f"Task {metadata} with problem description: {problem_short_description}?"
@@ -134,7 +131,6 @@ def task_callback(ml_model_metadata,
 def configuration_callback(req, res):
 
     # Callback for configuration implementation here
-    global graph
     if 'model_from_goal' in req.configuration():
         res.node_id(req.node_id())
         res.transaction_id(req.transaction_id())
@@ -145,10 +141,10 @@ def configuration_callback(req, res):
             if len(parts) >= 2:
                 goal = parts[0].strip()
                 tag = parts[1].strip()
-                models = get_models_for_problem_and_tag(graph, goal, tag)
+                models = get_models_for_problem_and_tag(goal, tag)
             else:
                 goal = text.strip()
-                models = get_models_for_problem(graph, goal)
+                models = get_models_for_problem(goal)
 
             sorted_models = ', '.join(sorted([str(m[0]) for m in models]))
 
@@ -179,8 +175,16 @@ def configuration_callback(req, res):
 
 # Main workflow routine
 def run():
-    global graph
-    graph = load_graph(os.path.dirname(__file__)+'/graph_v2.ttl')
+    start_time = time.time()
+    loaded = False
+    while time.time() - start_time < 5:
+        if load_graph():
+            loaded = True
+            break
+        time.sleep(0.1)
+    if not loaded:
+        print("[Error] Graph not available")
+        exit(1)
     node = MLModelNode(callback=task_callback, service_callback=configuration_callback)
     global running
     running = True
