@@ -1,2 +1,4 @@
 # Ignore pycache Python dirs
 __pycache__/
+
+rag/models_index.ann
