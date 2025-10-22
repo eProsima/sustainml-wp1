@@ -25,7 +25,7 @@ import json
 from rdftool.ModelONNXCodebase import model
 from rdftool.rdfCode import load_graph, get_models_for_problem, get_models_for_problem_and_tag
 
-from rag.rag_backend import answer_question
+from rag.rag_backend import answer_question, get_allowed_models_for_problem
 
 # Whether to go on spinning or interrupt
 running = False
@@ -95,15 +95,16 @@ def task_callback(ml_model_metadata,
             problem_short_description = extra_data_dict["problem_short_description"]
 
         metadata = ml_model_metadata.ml_model_metadata()[0]
-        
+
         if chosen_model is None:
             print(f"Problem short description: {problem_short_description}")
-            
-            # Choose model with the RAG based on the goal selected and the knowledge of the graph.
+
+            # Build the whitelist and force the RAG to pick ONLY from it
+            allowed = get_allowed_models_for_problem(metadata)  # Metadata is the goal name
             chosen_model = answer_question(
-                 f"Task {metadata} with problem description: {problem_short_description}?"
-             )
-            
+                f"Task {metadata} with problem description: {problem_short_description}?",
+                allowed_models=allowed
+            )
         print(f"ML Model chosen: {chosen_model}")
 
         # Generate model code and keywords

@@ -48,27 +48,37 @@ def search_semantic(query, top_k=200, sample_k=30):
     print("Neighbors results: ", results)  # debug
     return results
 
-def generate_natural_answer(knowledge, user_question):
+def generate_natural_answer(knowledge, user_question, allowed_models=None):
     """Generates a natural language response using the LLM."""
     print("Generate natural answer")
-    template = """
-    {
-        "model_name": "The name of the model that best fits the user's question with the given knowledge."
-    }
-    """
-    print(f"Full Knowledge: {knowledge}")  # debug
-    final_prompt = f"""
-    Based on the retrieved knowledge:
-    {knowledge}
 
-    Answer the following question: {user_question}.
-    The format of the Hugging Face name of the model must be like this one that follows: 'openai-community/gpt2-large'.
-    Only output one model name in JSON format.
-    For the json use the following template {template}. 
-    Do not add any sentence before and after.
-    """
+    if allowed_models:
+        template = '{"model_name":"<one item from allowed_models>"}'
+        allowed_str = ", ".join(allowed_models)
+        final_prompt = f"""
+        Based on the retrieved knowledge:
+        {knowledge}
+
+        Consider ONLY these allowed model names (choose exactly one):
+        {allowed_str}
+
+        Answer the following question: {user_question}
+        Output strictly in JSON following {template}.
+        """
+        system_msg = 'Only pick from the provided allowed list. If none, say: {"model_name":"none"}.'
+    else:
+        template = '{"model_name":"The name of the best-fitting model."}'
+        final_prompt = f"""
+        Based on the retrieved knowledge:
+        {knowledge}
+
+        Answer the following question: {user_question}.
+        Output strictly in JSON following {template}.
+        """
+        system_msg = ('Use only the provided context; if no answer, respond with {"model_name":"none"}.')
+
     messages = [
-        {"role": "system", "content": "You are an extremely concise assistant. Use only the provided context information to form your response. If an answer can not be found within the provided context information respond with 'The answer could not be found in the provided context."},
+        {"role": "system", "content": system_msg},
         {"role": "user", "content": final_prompt}
     ]
 
@@ -78,16 +88,49 @@ def generate_natural_answer(knowledge, user_question):
         options={"temperature": 0.0}
     )["message"]["content"].strip()
 
-def answer_question(user_question):
+def answer_question(user_question, allowed_models=None):
     """Handles user questions by retrieving search results."""
 
-    # TBD category
     knowledge = search_semantic(user_question)
+    raw = generate_natural_answer(knowledge, user_question, allowed_models=allowed_models)
 
-    answer = generate_natural_answer(knowledge, user_question)
-    clean = answer.strip().removeprefix("```json").removesuffix("```").strip().replace("'", '"')
-    data = json.loads(clean)
-    answer = data["model_name"]
-    print(f"Response: {answer}")  # debug
+    clean = raw.strip().removeprefix("```json").removesuffix("```").strip().replace("'", '"')
+    try:
+        data = json.loads(clean)
+        picked = data.get("model_name", "none")
+    except Exception:
+        picked = "none"
 
-    return answer
+    # Safety net: keep choice on-list
+    if allowed_models and picked not in allowed_models:
+        picked = allowed_models[0] if allowed_models else "none"
+    return picked
+
+
+def get_allowed_models_for_problem(problem_name: str):
+    """
+    Filter models by:
+      - For text-classification: status must be OK.
+      - For other problems: status not in (FAIL, OOM)
+        AND library must be transformers (accept namespaced ':transformers').
+    """
+    cypher = """
+    MATCH (m:Model)-[:HAS_PROBLEM]->(p:Problem {name: $problem_name})
+    OPTIONAL MATCH (m)-[:HAS_HEALTH_STATUS]->(hs:HealthStatus)
+    OPTIONAL MATCH (m)-[:USES_LIBRARY]->(l:Library)
+    WITH m, toLower(coalesce(hs.status, m.health_status)) AS status, l, $problem_name AS prob
+    WHERE
+      (
+        prob = 'text-classification' AND status = 'ok'
+      )
+      OR
+      (
+        prob <> 'text-classification'
+        AND (NOT status IN ['fail','oom'])
+        AND (l.name = 'transformers' OR l.name ENDS WITH ':transformers')
+      )
+    RETURN m.name AS name
+    ORDER BY m.downloads DESC, name
+    """
+    with neo4j_driver.session() as s:
+        return [r["name"] for r in s.run(cypher, problem_name=problem_name)]
