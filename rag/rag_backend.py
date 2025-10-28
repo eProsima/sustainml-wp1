@@ -35,47 +35,91 @@ neo4j_driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD)
 
 client = Client(host='http://localhost:11434')
 
-def search_semantic(query, top_k=200, sample_k=30):
-    """Performs semantic search on the Annoy index."""
+
+def search_semantic(query, allowed_models=None, top_k=20, sample_k=10):
+    """Semantic search. If allowed_models is provided, search ONLY among those models."""
     print("Search Semantic")
     query_embedding = sentence_model.encode([query], convert_to_tensor=True).cpu().detach().numpy()[0]
-    nearest_neighbors = annoy_index.get_nns_by_vector(query_embedding, top_k)
-    sampled = random.sample(nearest_neighbors, min(sample_k, len(nearest_neighbors)))
 
-    results = []
-    for idx in sampled:
-        results.append(metadata[idx])
-    print("Neighbors results: ", results)  # debug
-    return results
+    # 1) If we have an allowed list, build a tiny sub-index and query ONLY that
+    if allowed_models:
+        # Normalize names to map reliably
+        name_to_global = {
+            (m.get("name","").strip().casefold()): i
+            for i, m in enumerate(metadata) if m.get("name")
+        }
+        # Map allowed names -> global ids; keep original names for mapping back
+        pairs = []
+        for n in allowed_models:
+            gid = name_to_global.get((n or "").strip().casefold())
+            if gid is not None:
+                pairs.append((gid, n))
+        if not pairs:
+            print("No allowed models matched metadata names.")
+            return []
+
+        # Build a small in-memory Annoy index with ONLY allowed vectors
+        sub = AnnoyIndex(1024, 'angular')
+        id2name = []
+        for new_id, (gid, name) in enumerate(pairs):
+            sub.add_item(new_id, annoy_index.get_item_vector(gid))
+            id2name.append(name)
+        sub.build(10)
+
+        # Query sub-index; cap K by available items
+        k = min(top_k, sub.get_n_items()) or 1
+        nn = sub.get_nns_by_vector(query_embedding, k)
+        if not nn:
+            print("No neighbors within allowed subset.")
+            return []
+
+        # Map back to original metadata using names (names are from allowed list)
+        name_to_data = {m["name"]: m for m in metadata if m.get("name")}
+        results = [name_to_data[id2name[i]] for i in nn if 0 <= i < len(id2name) and id2name[i] in name_to_data]
+
+        # Sample for downstream prompt size
+        if not results:
+            return []
+        sampled = random.sample(results, min(sample_k, len(results)))
+        print("Allowed-only neighbors:", [x.get("name") for x in sampled])
+        if allowed_models:
+            allowed_set = {a.strip() for a in allowed_models if a}
+            offenders = [m.get("name") for m in sampled if m.get("name") not in allowed_set]
+            if offenders:
+                print("[ERR] sampled names not in allowed set:", offenders)
+        return sampled
+
+    # 2) No whitelist: fall back to global index (original behavior)
+    nn = annoy_index.get_nns_by_vector(query_embedding, top_k)
+    if not nn:
+        print("No neighbors in global index.")
+        return []
+    results = [metadata[i] for i in nn if 0 <= i < len(metadata)]
+    sampled = random.sample(results, min(sample_k, len(results)))
+    print("Global neighbors:", [x.get("name") for x in sampled])
+    return sampled
+
 
 def generate_natural_answer(knowledge, user_question, allowed_models=None):
-    """Generates a natural language response using the LLM."""
+    """Return a model_name. If a whitelist is provided, pick directly from knowledge (no LLM)."""
     print("Generate natural answer")
 
     if allowed_models:
-        template = '{"model_name":"<one item from allowed_models>"}'
-        allowed_str = ", ".join(allowed_models)
-        final_prompt = f"""
-        Based on the retrieved knowledge:
-        {knowledge}
+        allowed_set = {str(a).strip() for a in allowed_models if a}
+        # Keep only names that actually came back from retrieval
+        candidates = [m.get("name") for m in knowledge if m.get("name") in allowed_set]
+        picked = candidates[0] if candidates else "None"
+        return json.dumps({"model_name": picked})
 
-        Consider ONLY these allowed model names (choose exactly one):
-        {allowed_str}
+    template = '{"model_name":"The name of the best-fitting model."}'
+    final_prompt = f"""
+    Based on the retrieved knowledge:
+    {knowledge}
 
-        Answer the following question: {user_question}
-        Output strictly in JSON following {template}.
-        """
-        system_msg = 'Only pick from the provided allowed list. If none, say: {"model_name":"none"}.'
-    else:
-        template = '{"model_name":"The name of the best-fitting model."}'
-        final_prompt = f"""
-        Based on the retrieved knowledge:
-        {knowledge}
-
-        Answer the following question: {user_question}.
-        Output strictly in JSON following {template}.
-        """
-        system_msg = ('Use only the provided context; if no answer, respond with {"model_name":"none"}.')
+    Answer the following question: {user_question}.
+    Output strictly in JSON following {template}.
+    """
+    system_msg = ('Use only the provided context; if no answer, respond with {"model_name":"None"}.')
 
     messages = [
         {"role": "system", "content": system_msg},
@@ -88,49 +132,24 @@ def generate_natural_answer(knowledge, user_question, allowed_models=None):
         options={"temperature": 0.0}
     )["message"]["content"].strip()
 
-def answer_question(user_question, allowed_models=None):
-    """Handles user questions by retrieving search results."""
 
-    knowledge = search_semantic(user_question)
+def answer_question(user_question, allowed_models=None):
+    """Pick a model strictly from the provided allowed_models list (goal-scoped)."""
+    if not allowed_models:
+        print("[WARN] answer_question called without allowed_models; returning 'None'")
+        return "None"
+
+    # Retrieval restricted to allowed_models via sub-index
+    knowledge = search_semantic(user_question, allowed_models=allowed_models)
+
+    # Deterministic pick from retrieved knowledge (no LLM wandering)
     raw = generate_natural_answer(knowledge, user_question, allowed_models=allowed_models)
 
     clean = raw.strip().removeprefix("```json").removesuffix("```").strip().replace("'", '"')
     try:
         data = json.loads(clean)
-        picked = data.get("model_name", "none")
+        picked = data.get("model_name", "None")
     except Exception:
-        picked = "none"
+        picked = "None"
 
-    # Safety net: keep choice on-list
-    if allowed_models and picked not in allowed_models:
-        picked = allowed_models[0] if allowed_models else "none"
     return picked
-
-
-def get_allowed_models_for_problem(problem_name: str):
-    """
-    Filter models by:
-      - For text-classification: status must be OK.
-      - For other problems: status not in (FAIL, OOM)
-        AND library must be transformers (accept namespaced ':transformers').
-    """
-    cypher = """
-    MATCH (m:Model)-[:HAS_PROBLEM]->(p:Problem {name: $problem_name})
-    OPTIONAL MATCH (m)-[:HAS_HEALTH_STATUS]->(hs:HealthStatus)
-    OPTIONAL MATCH (m)-[:USES_LIBRARY]->(l:Library)
-    WITH m, toLower(coalesce(hs.status, m.health_status)) AS status, l, $problem_name AS prob
-    WHERE
-      (
-        prob = 'text-classification' AND status = 'ok'
-      )
-      OR
-      (
-        prob <> 'text-classification'
-        AND (NOT status IN ['fail','oom'])
-        AND (l.name = 'transformers' OR l.name ENDS WITH ':transformers')
-      )
-    RETURN m.name AS name
-    ORDER BY m.downloads DESC, name
-    """
-    with neo4j_driver.session() as s:
-        return [r["name"] for r in s.run(cypher, problem_name=problem_name)]

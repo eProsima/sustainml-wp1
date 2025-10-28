@@ -67,6 +67,7 @@ unsupported_goals = [
                 "table-question-answering",
                 "tabular-classification",
                 "tabular-regression",
+                "text-classification",
                 "text-ranking",
                 "text-to-3d",
                 "text-to-audio",

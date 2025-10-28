@@ -376,6 +376,15 @@ def get_models_for_problem(problem_literal_text):
     ### get models with correct machine learning goal:      ###
     ###########################################################
     cypher_query = """
+    MATCH (m:Model)-[:HAS_PROBLEM]->(p:Problem)
+    WHERE p.name = $problem_name
+    RETURN m.name AS model, m.downloads AS downloads
+    ORDER BY m.downloads DESC
+    """
+
+    # The following snippet is left commented out in case we want to reintroduce filtering with health status and library checks
+    # once the database is completely updated
+    '''
     MATCH (m:Model)-[:HAS_PROBLEM]->(:Problem {name: $problem_name})
     OPTIONAL MATCH (m)-[:HAS_HEALTH_STATUS]->(hs:HealthStatus)
     OPTIONAL MATCH (m)-[:USES_LIBRARY]->(l:Library)
@@ -397,7 +406,7 @@ def get_models_for_problem(problem_literal_text):
     )
     RETURN DISTINCT m.name AS model, m.downloads AS downloads
     ORDER BY downloads DESC, model
-    """
+    '''
 
     #     with neo4j_driver.session() as session:
     #         rows = session.run(cypher_query, problem_name=problem_literal_text)
@@ -416,6 +425,16 @@ def get_models_for_problem_and_tag(problem_literal_text, tag):
     ### with the specified tag (e.g., transformers)         ###
     ###########################################################
     cypher_query = """
+    MATCH (m:Model)-[:HAS_PROBLEM]->(p:Problem)
+    MATCH (m)-[:HAS_TAG]->(t:Tag)
+    WHERE p.name = $problem_name AND t.name = $tag_name
+    RETURN m.name AS model, m.downloads AS downloads
+    ORDER BY m.downloads DESC
+    """
+
+    # The following snippet is left commented out in case we want to reintroduce filtering by tag with health status and library checks
+    # once the database is completely updated
+    '''
     MATCH (m:Model)-[:HAS_PROBLEM]->(:Problem {name: $problem_name})
     MATCH (m)-[:HAS_TAG]->(t:Tag)
     WHERE t.name = $tag_name
@@ -438,10 +457,14 @@ def get_models_for_problem_and_tag(problem_literal_text, tag):
     )
     RETURN DISTINCT m.name AS model, m.downloads AS downloads
     ORDER BY downloads DESC, model
-    """
+    '''
+
     with neo4j_driver.session() as session:
-        rows = session.run(cypher_query, problem_name=problem_literal_text, tag_name=tag)
-        #return [(r["model"], record["downloads"]) for r in rows]
+        results = session.run(cypher_query,
+                            problem_name=problem_literal_text,
+                            tag_name=tag)
+        models = [(record["model"], record["downloads"]) for record in results]
+    # return models
 
     # Should be updated in case we come back to filtering by tag, the following line commented out and the previous one uncommented
     return get_models_for_problem(problem_literal_text)
