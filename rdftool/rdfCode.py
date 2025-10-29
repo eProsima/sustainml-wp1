@@ -8,11 +8,11 @@ NEO4J_PASSWORD = "12345678"
 # Connect to Neo4j
 neo4j_driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
 
-# -------------------------
-# Problem-specific WHITELIST
-# Only these models will be considered for the listed problems.
-# Model names must match the `m.name` in the DB exactly (case-sensitive).
-# -------------------------
+###############################################################################
+### Problem-specific WHITELIST                                              ###
+### Only these models will be considered for the listed problems.           ###
+### Model names must match the `m.name` in the DB exactly (case-sensitive). ###
+###############################################################################
 WHITELIST = {
     "summarization": frozenset([
         "ARTeLab/mbart-summarization-mlsum",

@@ -87,8 +87,6 @@ def task_callback(ml_model_metadata,
 
     try:
         chosen_model = None
-        # Model restriction after various outputs
-        restrained_models = []
         type = None
         extra_data_bytes = ml_model_metadata.extra_data()
         if extra_data_bytes:
@@ -101,9 +99,6 @@ def task_callback(ml_model_metadata,
 
             if "type" in extra_data_dict:
                 type = extra_data_dict["type"]
-
-            if "model_restrains" in extra_data_dict:
-                restrained_models = extra_data_dict["model_restrains"]
 
             if "model_selected" in extra_data_dict:
                 chosen_model = extra_data_dict["model_selected"]
@@ -135,19 +130,10 @@ def task_callback(ml_model_metadata,
         if not allowed_names:
             raise Exception("No candidates in graph for the selected goal")
 
-        # Track models to avoid repeats across outputs
-        restrained_models = []
-        if extra_data_bytes:
-            try:
-                if "model_restrains" in extra_data_dict:
-                    restrained_models = list(set(extra_data_dict["model_restrains"]))
-            except Exception:
-                pass
-
         # Try up to 10 candidates, skipping misfits transparently
         chosen_model = None
         for _ in range(10):
-            remaining = [n for n in allowed_names if n not in restrained_models]
+            remaining = [n for n in allowed_names]
             if not remaining:
                 break
 
@@ -157,15 +143,11 @@ def task_callback(ml_model_metadata,
             )
 
             if not candidate or candidate.strip().lower() == "none":
-                # Mark and try again
-                if candidate:
-                    restrained_models.append(candidate)
                 continue
 
             # Final safety: ensure candidate really belongs to goal
             if not _model_has_goal(neo4j_driver, candidate, goal):
                 print(f"[GUARD] Dropping {candidate}: not linked to goal {goal}")
-                restrained_models.append(candidate)
                 continue
 
             chosen_model = candidate
