@@ -160,7 +160,7 @@ def task_callback(user_input, node_status, ml_model_metadata):
             print(f"[ML_MODEL_METADATA] Using UI-provided goal: {ui_goal}")
             return
 
-        # --- NEW: if a specific model is chosen, bypass goal inference entirely
+        # If a specific model is chosen, bypass goal inference entirely
         if extra_data_dict.get("model_selected"):
             print(f"[ML_MODEL_METADATA] Skipping goal inference; model_selected='{extra_data_dict['model_selected']}'")
             # Optional: explicitly clear to show blank for the CNN+FPGA U-Net fast path
@@ -169,7 +169,6 @@ def task_callback(user_input, node_status, ml_model_metadata):
             except Exception:
                 ml_model_metadata.ml_model_metadata([])
             return
-        # --- END NEW
 
         # Collect optional dataset metadata (used only to enrich the prompt)
         if "dataset_metadata_description" in extra_data_dict:
@@ -218,9 +217,6 @@ def task_callback(user_input, node_status, ml_model_metadata):
     if (user_input.problem_definition() != ""):
         problem = f"{problem}. {user_input.problem_definition()}."
 
-    print(f"Complete problem defined: {problem}")
-    print(f"Complete prompt use: {prompt}")
-
     mlgoal = None
     max_attempts = 3
     attempt = 0
@@ -233,7 +229,6 @@ def task_callback(user_input, node_status, ml_model_metadata):
         attempt += 1
         prompt = f"Your previous answer '{mlgoal}' was not valid. {prompt}"
         print(f"Retry {attempt}: Response '{mlgoal}' is not among available goals. Retrying...")
-        print(f"Using new prompt: {prompt}")
 
     if mlgoal is not None and mlgoal in goals:
         ml_model_metadata.ml_model_metadata().append(mlgoal)
@@ -277,7 +272,7 @@ def configuration_callback(req, res):
             else:
                 res.success(True)
                 res.err_code(0) # 0: No error || 1: Error
-            print(f"Available Modalities: {sorted_modalities}") #debug
+            # print(f"Available Modalities: {sorted_modalities}") #debug
 
             raw_goals = get_problems()
             inputs = [str(g) for g in raw_goals]
@@ -290,7 +285,7 @@ def configuration_callback(req, res):
             else:
                 res.success(True)
                 res.err_code(0) # 0: No error || 1: Error
-            print(f"Available Goals: {sorted_goals}")   #debug
+            # print(f"Available Goals: {sorted_goals}")   #debug
 
             # json_str = json.dumps(dict(modalities=sorted_modalities, goals=sorted_goals))
             # print(len(json_str))    #debug
@@ -317,8 +312,8 @@ def configuration_callback(req, res):
             else:
                 res.success(True)
                 res.err_code(0) # 0: No error || 1: Error
-            print(f"Available Input Modalities: {sorted_inputs}") #debug
-            print(f"Available Output Modalities: {sorted_outputs}") #debug
+            # print(f"Available Input Modalities: {sorted_inputs}") #debug
+            # print(f"Available Output Modalities: {sorted_outputs}") #debug
 
             res.configuration(json.dumps(dict(inputs=sorted_inputs, outputs=sorted_outputs)))
 
@@ -419,7 +414,7 @@ def configuration_callback(req, res):
         else:
             res.success(True)
             res.err_code(0) # 0: No error || 1: Error
-        print(f"Available Metrics: {sorted_metrics}")   #debug
+        # print(f"Available Metrics: {sorted_metrics}")   #debug
 
         res.configuration(json.dumps(dict(metrics=sorted_metrics)))
 
@@ -438,7 +433,7 @@ def configuration_callback(req, res):
                 res.success(True)
                 res.err_code(0)  # 0: No error || 1: Error
 
-            print(f"Model details for {model}: {details}")  #debug
+            # print(f"Model details for {model}: {details}")  #debug
             res.configuration(json.dumps(details))
         except Exception as e:
             print(f"Error getting model details from request: {e}")
@@ -461,7 +456,7 @@ def configuration_callback(req, res):
                 res.success(True)
                 res.err_code(0)  # 0: No error || 1: Error
 
-            print(f"Problems for {modality}: {goals}")  #debug
+            # print(f"Problems for {modality}: {goals}")  #debug
             res.configuration(json.dumps(dict(goals=sorted_goals)))
 
         except Exception as e:
@@ -476,7 +471,7 @@ def configuration_callback(req, res):
         client = Client(host='http://localhost:11434')
         try:
             dataset_path = req.configuration()[len("dataset_path, "):]
-            print(f"Dataset path received: {dataset_path}")  #debug
+            # print(f"Dataset path received: {dataset_path}")  #debug
 
             if dataset_path.endswith('.csv'):
                 # Load the CSV file
@@ -536,7 +531,7 @@ def run():
             break
         time.sleep(0.1)
     if not loaded:
-        print("[Error] Graph not available")
+        print("[Error][ml_model_metadata] Graph not available")
         exit(1)
     node = MLModelMetadataNode(callback=task_callback, service_callback=configuration_callback)
     global running

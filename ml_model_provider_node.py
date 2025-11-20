@@ -23,10 +23,11 @@ import sys
 import threading
 import time
 
-for sub in ["", "hw_provider_fpga"]:
-    path = os.path.expanduser(f"~/SustainML/SustainML_ws/src/sustainml_framework/src/{sub}")
-    if os.path.isdir(path) and path not in sys.path:
-        sys.path.insert(0, path)
+HERE = os.path.dirname(__file__)
+WP2_ROOT = os.path.abspath(os.path.join(HERE, "..", "sustainml-wp2"))
+
+if WP2_ROOT not in sys.path:
+    sys.path.insert(0, WP2_ROOT)
 
 import hw_provider_fpga
 
@@ -119,6 +120,8 @@ def task_callback(ml_model_metadata,
 
     try:
         chosen_model = None
+        # Model restriction after various outputs
+        restrained_models = []
         type = None
         extra_data_bytes = ml_model_metadata.extra_data()
         if extra_data_bytes:
@@ -131,6 +134,9 @@ def task_callback(ml_model_metadata,
 
             if "type" in extra_data_dict:
                 type = extra_data_dict["type"]
+
+            if "model_restrains" in extra_data_dict:
+                restrained_models = extra_data_dict["model_restrains"]
 
             if "model_selected" in extra_data_dict:
                 chosen_model = extra_data_dict["model_selected"]
@@ -181,10 +187,19 @@ def task_callback(ml_model_metadata,
         if not allowed_names:
             raise Exception("No candidates in graph for the selected goal")
 
+        # Track models to avoid repeats across outputs
+        restrained_models = []
+        if extra_data_bytes:
+            try:
+                if "model_restrains" in extra_data_dict:
+                    restrained_models = list(set(extra_data_dict["model_restrains"]))
+            except Exception:
+                pass
+
         # Try up to 10 candidates, skipping misfits transparently
         chosen_model = None
         for _ in range(10):
-            remaining = [n for n in allowed_names]
+            remaining = [n for n in allowed_names if n not in restrained_models]
             if not remaining:
                 break
 
@@ -194,11 +209,15 @@ def task_callback(ml_model_metadata,
             )
 
             if not candidate or candidate.strip().lower() == "none":
+                # Mark and try again
+                if candidate:
+                    restrained_models.append(candidate)
                 continue
 
             # Final safety: ensure candidate really belongs to goal
             if not _model_has_goal(neo4j_driver, candidate, goal):
                 print(f"[GUARD] Dropping {candidate}: not linked to goal {goal}")
+                restrained_models.append(candidate)
                 continue
 
             chosen_model = candidate
@@ -235,7 +254,6 @@ def configuration_callback(req, res):
     raw = (req.configuration() or "").strip()
     res.node_id(req.node_id())
     res.transaction_id(req.transaction_id())
-    print(f"[ML_MODEL_PROVIDER] configuration_callback RAW='{raw}'")
 
     # Only handle the listing endpoint(s)
     if raw.lower().startswith("model_from_goal"):
@@ -246,20 +264,18 @@ def configuration_callback(req, res):
         args_str = s[1] if len(s) > 1 else ""          # everything after first comma
         parts = [p.strip() for p in args_str.split(",") if p is not None]
 
-        # Normalize arity (goal, hw, family); tolerate leftover extra tokens
+        # Normalize arity (goal, hw, family)
         goal   = parts[0] if len(parts) >= 1 else ""
         hw     = parts[1] if len(parts) >= 2 else ""
         family = parts[2] if len(parts) >= 3 else ""
 
-        print(f"[ML_MODEL_PROVIDER] parsed -> goal='{goal}', hw='{hw}', family='{family}'")
-
         fam_l = (family or "").lower()
         hw_l  = (hw or "").lower()
-        is_cnn  = fam_l in ("cnn", "cnns")
+        is_cnn  = fam_l.lower() == "cnns"
         is_fpga = "fpga" in hw_l
 
         # U-Net fast path: allow sentinel goals like U_NET_MODELS or any goal when (FPGA+CNNs)
-        if goal.upper() in ("U_NET_MODELS", "U-NET", "UNET") or (is_cnn and is_fpga):
+        if (goal.upper() == "U_NET_MODELS") or (is_cnn and is_fpga):
             try:
                 try:
                     vendored = abspath(join(dirname(hw_provider_fpga.__file__),
@@ -271,10 +287,6 @@ def configuration_callback(req, res):
                 names = []
                 if vendored and isdir(vendored):
                     names = [f[:-5] for f in listdir(vendored) if f.endswith(".onnx")]
-
-                if not names:
-                    # Fallback: static sample list so UI never shows a blank entry
-                    names = ["unet_model_000", "unet_model_001"]
 
                 csv = ", ".join(sorted(names))
                 print(f"[ML_MODEL_PROVIDER] U-NET returning {len(names)} items")
@@ -324,7 +336,7 @@ def run():
             break
         time.sleep(0.1)
     if not loaded:
-        print("[Error] Graph not available")
+        print("[Error][ml_model_provider] Graph not available")
         exit(1)
     node = MLModelNode(callback=task_callback, service_callback=configuration_callback)
     global running
