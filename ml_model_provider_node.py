@@ -37,6 +37,38 @@ from rdftool.rdfCode import load_graph, get_models_for_problem
 from rag.rag_backend import answer_question
 from os.path import isdir, dirname, abspath, join
 from os import listdir
+import asyncio
+from fastmcp import Client
+
+MCP_PYTHON = os.path.expanduser("~/.venvs/sustainml_mcp/bin/python")
+MCP_SERVER_SCRIPT = os.path.expanduser(
+    "~/SustainML/SustainML_ws/src/sustainml_lib/sustainml_modules/sustainml_modules/sustainml-wp1/hf_mcp_server.py"
+)
+MCP_SERVER_SCRIPT = os.path.abspath(MCP_SERVER_SCRIPT)
+
+def _mcp_call(tool_name: str, args: dict) -> dict:
+    config = {
+        "mcpServers": {
+            "hf": {
+                "command": MCP_PYTHON,
+                "args": ["-u", MCP_SERVER_SCRIPT],
+                "env": {
+                    "FASTMCP_NO_BANNER": "1",
+                    "FASTMCP_QUIET": "1",
+                    "FASTMCP_SILENT": "1",
+                    "MCP_QUIET": "1",
+                }
+            }
+        }
+    }
+
+    async def _run():
+        async with Client(config) as c:
+            res = await c.call_tool(f"hf_{tool_name}", args)
+            return res
+
+    r = asyncio.run(_run())
+    return json.loads(r.content[0].text)
 
 # Neo4j config/driver for local checks (used by _model_has_goal)
 NEO4J_URI = "bolt://localhost:7687"
@@ -244,8 +276,6 @@ def task_callback(ml_model_metadata,
         error_info = {"error_code": "NO_MODEL", "error": error_message}
         encoded_error = json.dumps(error_info).encode("utf-8")
         ml_model.extra_data(encoded_error)
-
-
 # User Configuration Callback implementation
 # Inputs: req
 # Outputs: res
@@ -254,6 +284,32 @@ def configuration_callback(req, res):
     raw = (req.configuration() or "").strip()
     res.node_id(req.node_id())
     res.transaction_id(req.transaction_id())
+
+    # HF search (metadata-only browsing; no evaluation)
+    if raw.lower().startswith("hf_search"):
+        # Format: "hf_search, <description>, <limit>"
+        s = raw.split(",", 1)
+        args_str = s[1] if len(s) > 1 else ""
+        parts = [p.strip() for p in args_str.split(",")]
+
+        description = parts[0] if len(parts) >= 1 else ""
+        limit_str = parts[1] if len(parts) >= 2 else ""
+        try:
+            limit = int(limit_str) if limit_str else 20
+        except Exception:
+            limit = 20
+
+        try:
+            resp = _mcp_call("search_models", {"description": description, "limit": limit})
+            res.success(True)
+            res.err_code(0)
+            res.configuration(json.dumps(resp))
+            return
+        except Exception as e:
+            res.success(False)
+            res.err_code(1)
+            res.configuration(json.dumps({"models": [], "error": str(e)}))
+            return
 
     # Only handle the listing endpoint(s)
     if raw.lower().startswith("model_from_goal"):
