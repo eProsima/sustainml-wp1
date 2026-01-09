@@ -13,9 +13,7 @@
 # limitations under the License.
 """SustainML ML Model Provider Node Implementation."""
 
-from sustainml_py.nodes.MLModelNode import MLModelNode
-
-# Manage signaling
+import asyncio
 import json
 import os
 import signal
@@ -37,26 +35,22 @@ from rdftool.rdfCode import load_graph, get_models_for_problem
 from rag.rag_backend import answer_question
 from os.path import isdir, dirname, abspath, join
 from os import listdir
-import asyncio
+from sustainml_py.nodes.MLModelNode import MLModelNode
 from fastmcp import Client
 
-MCP_PYTHON = os.path.expanduser("~/.venvs/sustainml_mcp/bin/python")
-MCP_SERVER_SCRIPT = os.path.expanduser(
+
+MCP_SERVER_SCRIPT = os.path.abspath(os.path.expanduser(
     "~/SustainML/SustainML_ws/src/sustainml_lib/sustainml_modules/sustainml_modules/sustainml-wp1/hf_mcp_server.py"
-)
-MCP_SERVER_SCRIPT = os.path.abspath(MCP_SERVER_SCRIPT)
+))
 
 def _mcp_call(tool_name: str, args: dict) -> dict:
     config = {
         "mcpServers": {
             "hf": {
-                "command": MCP_PYTHON,
+                "command": sys.executable,
                 "args": ["-u", MCP_SERVER_SCRIPT],
                 "env": {
-                    "FASTMCP_NO_BANNER": "1",
-                    "FASTMCP_QUIET": "1",
-                    "FASTMCP_SILENT": "1",
-                    "MCP_QUIET": "1",
+                    "FASTMCP_NO_BANNER": "1"
                 }
             }
         }
@@ -276,6 +270,8 @@ def task_callback(ml_model_metadata,
         error_info = {"error_code": "NO_MODEL", "error": error_message}
         encoded_error = json.dumps(error_info).encode("utf-8")
         ml_model.extra_data(encoded_error)
+
+
 # User Configuration Callback implementation
 # Inputs: req
 # Outputs: res
@@ -287,17 +283,24 @@ def configuration_callback(req, res):
 
     # HF search (metadata-only browsing; no evaluation)
     if raw.lower().startswith("hf_search"):
-        # Format: "hf_search, <description>, <limit>"
-        s = raw.split(",", 1)
-        args_str = s[1] if len(s) > 1 else ""
-        parts = [p.strip() for p in args_str.split(",")]
+        # Expected: "hf_search, <description>, <limit>"
+        rest = raw[len("hf_search"):].lstrip()
+        if rest.startswith(","):
+            rest = rest[1:].lstrip()
 
-        description = parts[0] if len(parts) >= 1 else ""
-        limit_str = parts[1] if len(parts) >= 2 else ""
-        try:
-            limit = int(limit_str) if limit_str else 20
-        except Exception:
-            limit = 20
+        # Split from the RIGHT so commas inside description are allowed
+        description = rest
+        limit = 20
+
+        if "," in rest:
+            desc_part, limit_part = rest.rsplit(",", 1)
+            description = desc_part.strip()
+            try:
+                limit = int(limit_part.strip())
+            except Exception:
+                limit = 20
+        else:
+            description = rest.strip()
 
         try:
             resp = _mcp_call("search_models", {"description": description, "limit": limit})
