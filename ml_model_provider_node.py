@@ -23,9 +23,26 @@ import time
 import json
 
 from rdftool.ModelONNXCodebase import model
+from neo4j import GraphDatabase
 from rdftool.rdfCode import load_graph, get_models_for_problem, get_models_for_problem_and_tag
 
 from rag.rag_backend import answer_question
+
+# Neo4j config/driver for local checks (used by _model_has_goal)
+NEO4J_URI = "bolt://localhost:7687"
+NEO4J_USER = "neo4j"
+NEO4J_PASSWORD = "12345678"
+neo4j_driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
+
+def _model_has_goal(neo4j_driver, model_name: str, goal: str) -> bool:
+    cypher = """
+    MATCH (m:Model {name: $model})-[:HAS_PROBLEM]->(p:Problem)
+    WHERE toLower(p.name) = toLower($goal)
+    RETURN COUNT(*) AS cnt
+    """
+    with neo4j_driver.session() as s:
+        r = s.run(cypher, model=model_name, goal=goal).single()
+        return bool(r and r["cnt"] > 0)
 
 # Whether to go on spinning or interrupt
 running = False
@@ -70,8 +87,6 @@ def task_callback(ml_model_metadata,
 
     try:
         chosen_model = None
-        # Model restriction after various outputs
-        restrained_models = []
         type = None
         extra_data_bytes = ml_model_metadata.extra_data()
         if extra_data_bytes:
@@ -85,25 +100,61 @@ def task_callback(ml_model_metadata,
             if "type" in extra_data_dict:
                 type = extra_data_dict["type"]
 
-            if "model_restrains" in extra_data_dict:
-                restrained_models = extra_data_dict["model_restrains"]
-
             if "model_selected" in extra_data_dict:
                 chosen_model = extra_data_dict["model_selected"]
                 print("Model already selected: ", chosen_model)
 
+            # If a model was manually selected, skip automatic selection
+            if chosen_model:
+                print(f"[INFO] Using manually selected model: {chosen_model}")
+                onnx_path = model(chosen_model)
+                ml_model.model(chosen_model)
+                ml_model.model_path(onnx_path)
+
+                # Add unsupported_models information to extra_data in JSON format
+                extra_data = {"unsupported_models": unsupported_models}
+                encoded_data = json.dumps(extra_data).encode("utf-8")
+                ml_model.extra_data(encoded_data)
+                return
+
             problem_short_description = extra_data_dict["problem_short_description"]
 
-        metadata = ml_model_metadata.ml_model_metadata()[0]
-        
-        if chosen_model is None:
-            print(f"Problem short description: {problem_short_description}")
-            
-            # Choose model with the RAG based on the goal selected and the knowledge of the graph.
-            chosen_model = answer_question(
-                 f"Task {metadata} with problem description: {problem_short_description}?"
-             )
-            
+        goal = ml_model_metadata.ml_model_metadata()[0]  # Goal selected by metadata node
+        print(f"Problem short description: {problem_short_description}")
+        print(f"Selected goal (metadata): {goal}")
+
+        # Build strictly goal-scoped allowed list (names only)
+        goal_models = get_models_for_problem(goal)   # [(model_name, downloads), ...]
+        allowed_names = [name for (name, _) in goal_models]
+        print(f"[INFO] {len(allowed_names)} candidates for goal '{goal}'")
+        if not allowed_names:
+            raise Exception("No candidates in graph for the selected goal")
+
+        # Try up to 10 candidates, skipping misfits transparently
+        chosen_model = None
+        for _ in range(10):
+            remaining = [n for n in allowed_names]
+            if not remaining:
+                break
+
+            candidate = answer_question(
+                f"Task {goal} with problem description: {problem_short_description}?",
+                allowed_models=remaining
+            )
+
+            if not candidate or candidate.strip().lower() == "none":
+                continue
+
+            # Final safety: ensure candidate really belongs to goal
+            if not _model_has_goal(neo4j_driver, candidate, goal):
+                print(f"[GUARD] Dropping {candidate}: not linked to goal {goal}")
+                continue
+
+            chosen_model = candidate
+            break
+
+        if not chosen_model:
+            raise Exception("No suitable model after screening candidates")
         print(f"ML Model chosen: {chosen_model}")
 
         # Generate model code and keywords
@@ -116,11 +167,11 @@ def task_callback(ml_model_metadata,
         ml_model.extra_data(encoded_data)
 
     except Exception as e:
-        print(f"Failed to determine ML model for task {ml_model_metadata.task_id()}: {e}.")
-        ml_model.model("Error")
-        ml_model.model_path("Error")
-        error_message = "Failed to obtain ML model for task: " + str(e)
-        error_info = {"error": error_message}
+        print(f"[WARN] No suitable model found for task {ml_model_metadata.task_id()}: {e}")
+        ml_model.model("NO_MODEL")
+        ml_model.model_path("N/A")
+        error_message = "No suitable model found for the given problem."
+        error_info = {"error_code": "NO_MODEL", "error": error_message}
         encoded_error = json.dumps(error_info).encode("utf-8")
         ml_model.extra_data(encoded_error)
 
