@@ -382,36 +382,6 @@ def get_models_for_problem(problem_literal_text):
     ORDER BY m.downloads DESC
     """
 
-    # The following snippet is left commented out in case we want to reintroduce filtering with health status and library checks
-    # once the database is completely updated
-    '''
-    MATCH (m:Model)-[:HAS_PROBLEM]->(:Problem {name: $problem_name})
-    OPTIONAL MATCH (m)-[:HAS_HEALTH_STATUS]->(hs:HealthStatus)
-    OPTIONAL MATCH (m)-[:USES_LIBRARY]->(l:Library)
-    WITH
-      m,
-      collect(DISTINCT toLower(coalesce(hs.status, m.health_status))) AS statuses,
-      collect(DISTINCT l.name) AS libs
-    // --- GLOBAL RULES YOU WANTED ---
-    // text-classification => only OK
-    // others => status != FAIL/OOM AND library = transformers
-    WITH m, statuses, libs,
-         (EXISTS { MATCH (m)-[:HAS_PROBLEM]->(:Problem {name:'text-classification'}) }) AS is_tc
-    WHERE (
-        is_tc AND 'ok' IN statuses
-    ) OR (
-        NOT is_tc
-        AND any(s IN statuses WHERE NOT s IN ['fail','oom'])
-        AND any(lb IN libs WHERE lb = 'transformers' OR lb ENDS WITH ':transformers')
-    )
-    RETURN DISTINCT m.name AS model, m.downloads AS downloads
-    ORDER BY downloads DESC, model
-    '''
-
-    #     with neo4j_driver.session() as session:
-    #         rows = session.run(cypher_query, problem_name=problem_literal_text)
-    #         return [(r["model"], record["downloads"]) for r in rows]
-
     with neo4j_driver.session() as session:
         results = session.run(cypher_query, problem_name=problem_literal_text)
         models = [(record["model"], record["downloads"]) for record in results]
@@ -431,33 +401,6 @@ def get_models_for_problem_and_tag(problem_literal_text, tag):
     RETURN m.name AS model, m.downloads AS downloads
     ORDER BY m.downloads DESC
     """
-
-    # The following snippet is left commented out in case we want to reintroduce filtering by tag with health status and library checks
-    # once the database is completely updated
-    '''
-    MATCH (m:Model)-[:HAS_PROBLEM]->(:Problem {name: $problem_name})
-    MATCH (m)-[:HAS_TAG]->(t:Tag)
-    WHERE t.name = $tag_name
-       OR t.name ENDS WITH ":" + $tag_name
-       OR split($tag_name, ":")[-1] = split(t.name, ":")[-1]
-    OPTIONAL MATCH (m)-[:HAS_HEALTH_STATUS]->(hs:HealthStatus)
-    OPTIONAL MATCH (m)-[:USES_LIBRARY]->(l:Library)
-    WITH
-      m,
-      collect(DISTINCT toLower(coalesce(hs.status, m.health_status))) AS statuses,
-      collect(DISTINCT l.name) AS libs
-    WITH m, statuses, libs,
-         (EXISTS { MATCH (m)-[:HAS_PROBLEM]->(:Problem {name:'text-classification'}) }) AS is_tc
-    WHERE (
-        is_tc AND 'ok' IN statuses
-    ) OR (
-        NOT is_tc
-        AND any(s IN statuses WHERE NOT s IN ['fail','oom'])
-        AND any(lb IN libs WHERE lb = 'transformers' OR lb ENDS WITH ':transformers')
-    )
-    RETURN DISTINCT m.name AS model, m.downloads AS downloads
-    ORDER BY downloads DESC, model
-    '''
 
     with neo4j_driver.session() as session:
         results = session.run(cypher_query,

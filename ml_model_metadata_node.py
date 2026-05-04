@@ -115,9 +115,8 @@ def get_llm_response(client, model_version, problem_definition, prompt):
 # Inputs: user_input
 # Outputs: node_status, ml_model_metadata
 def task_callback(user_input, node_status, ml_model_metadata):
-
     # Callback implementation here
-    print (f"Received Task: {user_input.task_id().problem_id()},{user_input.task_id().iteration_id()}")
+    print(f"Received Task: {user_input.task_id().problem_id()},{user_input.task_id().iteration_id()}")
     client = Client(host='http://localhost:11434')
     dataset_metadata = {}
 
@@ -140,37 +139,53 @@ def task_callback(user_input, node_status, ml_model_metadata):
 
         if "type" in extra_data_dict and extra_data_dict["type"] != "":
             accumulated_data["type"] = extra_data_dict["type"]
+
         problem = user_input.problem_short_description()
         accumulated_data["problem_short_description"] = problem
+
+        # Persist what we’ve gathered so downstream nodes see it
         encoded_data = json.dumps(accumulated_data).encode("utf-8")
         ml_model_metadata.extra_data(encoded_data)
 
-        if "goal" in extra_data_dict and extra_data_dict["goal"] != "":
-            goal = extra_data_dict["goal"]
-            ml_model_metadata.ml_model_metadata().append(goal)
-            print(f"Skipped ML Model Metadata. ML Goal selected as input: {goal}")
+        ui_goal = (extra_data_dict.get("goal") or "").strip()
+        if ui_goal:
+            # Ensure the metadata list contains exactly this goal
+            try:
+                lst = ml_model_metadata.ml_model_metadata()
+                lst.clear()
+                lst.append(ui_goal)
+            except Exception:
+                # Fallback in case the API expects direct assignment
+                ml_model_metadata.ml_model_metadata([ui_goal])
+            print(f"[ML_MODEL_METADATA] Using UI-provided goal: {ui_goal}")
             return
 
+        # If a specific model is chosen, bypass goal inference entirely
+        if extra_data_dict.get("model_selected"):
+            print(f"[ML_MODEL_METADATA] Skipping goal inference; model_selected='{extra_data_dict['model_selected']}'")
+            # Optional: explicitly clear to show blank for the CNN+FPGA U-Net fast path
+            try:
+                ml_model_metadata.ml_model_metadata().clear()
+            except Exception:
+                ml_model_metadata.ml_model_metadata([])
+            return
+
+        # Collect optional dataset metadata (used only to enrich the prompt)
         if "dataset_metadata_description" in extra_data_dict:
             dataset_metadata["description"] = extra_data_dict["dataset_metadata_description"]
-
         if "dataset_metadata_topic" in extra_data_dict:
             dataset_metadata["topic"] = extra_data_dict["dataset_metadata_topic"]
-
         if "dataset_metadata_profile" in extra_data_dict:
             dataset_metadata["profile"] = extra_data_dict["dataset_metadata_profile"]
-
         if "dataset_metadata_keywords" in extra_data_dict:
             dataset_metadata["keywords"] = extra_data_dict["dataset_metadata_keywords"]
-
         if "dataset_metadata_applications" in extra_data_dict:
             dataset_metadata["applications"] = extra_data_dict["dataset_metadata_applications"]
 
     except Exception as e:
         print(f"No extra data was found: {e}")
 
-
-    # Retrieve Possible Ml Goals from graph
+    # Retrieve Possible ML Goals from graph
     try:
         raw_goals = get_problems()
         inputs = [str(g) for g in raw_goals]
@@ -180,13 +195,16 @@ def task_callback(user_input, node_status, ml_model_metadata):
         return
 
     # Select MLGoal Using Ollama llama 3
-    prompt = f"Which of the following machine learning Goals can be used to solve this problem: {goals}?. Answer with only one of the Machine learning goals and nothing more, just the goal name without "" or ''. If you are not sure, answer with 'None'."
-    if(user_input.modality() != ""):
+    prompt = (
+        f"Which of the following machine learning Goals can be used to solve this problem: {goals}?. "
+        f"Answer with only one of the Machine learning goals and nothing more, just the goal name without \"\" or ''. "
+        f"If you are not sure, answer with 'None'."
+    )
+    if (user_input.modality() != ""):
         prompt = f"{prompt} Using the modality {user_input.modality()}."
-    # Add metrics to the prompt
-    if(user_input.inputs()):
+    if (user_input.inputs()):
         prompt = f"{prompt} The user inputs known are {', '.join(user_input.inputs())}."
-    if(user_input.outputs()):
+    if (user_input.outputs()):
         prompt = f"{prompt} The user outputs known are {', '.join(user_input.outputs())}."
     if isinstance(user_input.minimum_samples(), int) and user_input.minimum_samples() > 0:
         prompt = f"{prompt} Have into account that needs to have {user_input.minimum_samples()} minimum samples."
@@ -196,23 +214,21 @@ def task_callback(user_input, node_status, ml_model_metadata):
         prompt = f"{prompt} The dataset that must be analyzed with the chosen Goal has the following metadata {json.dumps(dataset_metadata)}."
 
     problem = user_input.problem_short_description()
-    if(user_input.problem_definition() != ""):
+    if (user_input.problem_definition() != ""):
         problem = f"{problem}. {user_input.problem_definition()}."
-
-    print (f"Complete problem defined: {problem}")
-    print (f"Complete prompt use: {prompt}")
 
     mlgoal = None
     max_attempts = 3
     attempt = 0
     while attempt < max_attempts:
-        mlgoal = get_llm_response(client, "llama3", problem, prompt).strip().lower()
+        mlgoal = get_llm_response(client, "llama3", problem, prompt)
+        if mlgoal:
+            mlgoal = mlgoal.strip().lower()
         if mlgoal is not None and mlgoal in goals:
             break
         attempt += 1
         prompt = f"Your previous answer '{mlgoal}' was not valid. {prompt}"
         print(f"Retry {attempt}: Response '{mlgoal}' is not among available goals. Retrying...")
-        print(f"Using new prompt: {prompt}")
 
     if mlgoal is not None and mlgoal in goals:
         ml_model_metadata.ml_model_metadata().append(mlgoal)
@@ -224,6 +240,7 @@ def task_callback(user_input, node_status, ml_model_metadata):
         error_info = {"error": error_message}
         encoded_error = json.dumps(error_info).encode("utf-8")
         ml_model_metadata.extra_data(encoded_error)
+
 
 # User Configuration Callback implementation
 # Inputs: req
@@ -255,7 +272,7 @@ def configuration_callback(req, res):
             else:
                 res.success(True)
                 res.err_code(0) # 0: No error || 1: Error
-            print(f"Available Modalities: {sorted_modalities}") #debug
+            # print(f"Available Modalities: {sorted_modalities}") #debug
 
             raw_goals = get_problems()
             inputs = [str(g) for g in raw_goals]
@@ -268,7 +285,7 @@ def configuration_callback(req, res):
             else:
                 res.success(True)
                 res.err_code(0) # 0: No error || 1: Error
-            print(f"Available Goals: {sorted_goals}")   #debug
+            # print(f"Available Goals: {sorted_goals}")   #debug
 
             # json_str = json.dumps(dict(modalities=sorted_modalities, goals=sorted_goals))
             # print(len(json_str))    #debug
@@ -295,8 +312,8 @@ def configuration_callback(req, res):
             else:
                 res.success(True)
                 res.err_code(0) # 0: No error || 1: Error
-            print(f"Available Input Modalities: {sorted_inputs}") #debug
-            print(f"Available Output Modalities: {sorted_outputs}") #debug
+            # print(f"Available Input Modalities: {sorted_inputs}") #debug
+            # print(f"Available Output Modalities: {sorted_outputs}") #debug
 
             res.configuration(json.dumps(dict(inputs=sorted_inputs, outputs=sorted_outputs)))
 
@@ -397,7 +414,7 @@ def configuration_callback(req, res):
         else:
             res.success(True)
             res.err_code(0) # 0: No error || 1: Error
-        print(f"Available Metrics: {sorted_metrics}")   #debug
+        # print(f"Available Metrics: {sorted_metrics}")   #debug
 
         res.configuration(json.dumps(dict(metrics=sorted_metrics)))
 
@@ -416,7 +433,7 @@ def configuration_callback(req, res):
                 res.success(True)
                 res.err_code(0)  # 0: No error || 1: Error
 
-            print(f"Model details for {model}: {details}")  #debug
+            # print(f"Model details for {model}: {details}")  #debug
             res.configuration(json.dumps(details))
         except Exception as e:
             print(f"Error getting model details from request: {e}")
@@ -439,7 +456,7 @@ def configuration_callback(req, res):
                 res.success(True)
                 res.err_code(0)  # 0: No error || 1: Error
 
-            print(f"Problems for {modality}: {goals}")  #debug
+            # print(f"Problems for {modality}: {goals}")  #debug
             res.configuration(json.dumps(dict(goals=sorted_goals)))
 
         except Exception as e:
@@ -454,7 +471,7 @@ def configuration_callback(req, res):
         client = Client(host='http://localhost:11434')
         try:
             dataset_path = req.configuration()[len("dataset_path, "):]
-            print(f"Dataset path received: {dataset_path}")  #debug
+            # print(f"Dataset path received: {dataset_path}")  #debug
 
             if dataset_path.endswith('.csv'):
                 # Load the CSV file
@@ -514,7 +531,7 @@ def run():
             break
         time.sleep(0.1)
     if not loaded:
-        print("[Error] Graph not available")
+        print("[Error][ml_model_metadata] Graph not available")
         exit(1)
     node = MLModelMetadataNode(callback=task_callback, service_callback=configuration_callback)
     global running
