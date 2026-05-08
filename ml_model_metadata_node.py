@@ -16,7 +16,6 @@
 from sustainml_py.nodes.MLModelMetadataNode import MLModelMetadataNode
 
 # Manage signaling
-import os
 import signal
 import threading
 import time

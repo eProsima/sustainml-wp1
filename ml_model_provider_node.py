@@ -13,9 +13,7 @@
 # limitations under the License.
 """SustainML ML Model Provider Node Implementation."""
 
-from sustainml_py.nodes.MLModelNode import MLModelNode
-
-# Manage signaling
+import asyncio
 import json
 import os
 import signal
@@ -37,6 +35,64 @@ from rdftool.rdfCode import load_graph, get_models_for_problem
 from rag.rag_backend import answer_question
 from os.path import isdir, dirname, abspath, join
 from os import listdir
+from sustainml_py.nodes.MLModelNode import MLModelNode
+from fastmcp import Client
+
+
+MCP_SERVER_SCRIPT = os.path.abspath(os.path.expanduser(
+    "~/SustainML/SustainML_ws/src/sustainml_lib/sustainml_modules/sustainml_modules/sustainml-wp1/hf_mcp_server.py"
+))
+
+_mcp_loop = None
+_mcp_thread = None
+_mcp_client = None
+_mcp_client_ctx = None
+
+
+def _start_asyncio_loop():
+    global _mcp_loop
+    _mcp_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(_mcp_loop)
+    _mcp_loop.run_forever()
+
+
+_mcp_thread = threading.Thread(target=_start_asyncio_loop, daemon=True)
+_mcp_thread.start()
+
+
+# Create (once) and return a persistent FastMCP client connected to the HF MCP server
+async def _ensure_mcp_client():
+    global _mcp_client, _mcp_client_ctx
+
+    if _mcp_client is not None:
+        return _mcp_client
+
+    config = {
+        "mcpServers": {
+            "hf": {
+                "command": sys.executable,
+                "args": ["-u", MCP_SERVER_SCRIPT],
+            }
+        }
+    }
+
+    # Keep the context open forever
+    _mcp_client_ctx = Client(config)
+    _mcp_client = await _mcp_client_ctx.__aenter__()
+    return _mcp_client
+
+
+# Calls a Hugging Face MCP tool asynchronously from the ML Model Provider node
+def _mcp_call(tool_name: str, args: dict) -> dict:
+    async def _run():
+        c = await _ensure_mcp_client()
+        res = await c.call_tool(f"hf_{tool_name}", args)
+        return json.loads(res.content[0].text)
+
+    # Submit coroutine to background loop
+    fut = asyncio.run_coroutine_threadsafe(_run(), _mcp_loop)
+    return fut.result(timeout=120) # 2 minutes timeout for MCP call
+
 
 # Neo4j config/driver for local checks (used by _model_has_goal)
 NEO4J_URI = "bolt://localhost:7687"
@@ -45,8 +101,8 @@ NEO4J_PASSWORD = "12345678"
 neo4j_driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
 
 
+# Return the directory containing vendored U-Net ONNX models
 def _unet_models_dir():
-    # optional override: SUSTAINML_UNET_DIR=/path/to/unet_models
     env = os.environ.get("SUSTAINML_UNET_DIR")
     if env:
         return os.path.abspath(env)
@@ -57,6 +113,7 @@ def _unet_models_dir():
     )
 
 
+# Lists available U-Net .onnx models from the vendor directory
 def list_unet_onnx_models(basename_only=True):
     d = _unet_models_dir()
     if not os.path.isdir(d):
@@ -67,6 +124,7 @@ def list_unet_onnx_models(basename_only=True):
            sorted([os.path.join(d, f) for f in names])
 
 
+# Checks in Neo4j whether a model node is linked to the given goal/problem
 def _model_has_goal(neo4j_driver, model_name: str, goal: str) -> bool:
     cypher = """
     MATCH (m:Model {name: $model})-[:HAS_PROBLEM]->(p:Problem)
@@ -81,7 +139,7 @@ def _model_has_goal(neo4j_driver, model_name: str, goal: str) -> bool:
 running = False
 
 
-# Load the list of unsupported
+# Load the list of unsupported models
 def load_unsupported_models(file_path):
     try:
         with open(file_path, 'r') as f:
@@ -94,12 +152,32 @@ def load_unsupported_models(file_path):
 unsupported_models = load_unsupported_models(os.path.dirname(__file__) + "/unsupported_models.txt")
 
 
+# Close the FastMCP client context and reset MCP globals
+def _shutdown_mcp():
+    global _mcp_client_ctx, _mcp_client
+    async def _close():
+        global _mcp_client_ctx, _mcp_client
+        if _mcp_client_ctx is not None:
+            try:
+                await _mcp_client_ctx.__aexit__(None, None, None)
+            except Exception:
+                pass
+        _mcp_client_ctx = None
+        _mcp_client = None
+
+    if _mcp_loop:
+        try:
+            asyncio.run_coroutine_threadsafe(_close(), _mcp_loop).result(timeout=5)
+        except Exception:
+            pass
+
 # Signal handler
 def signal_handler(sig, frame):
     print("\nExiting")
     MLModelNode.terminate()
     global running
     running = False
+    _shutdown_mcp()
 
 
 # User Callback implementation
@@ -144,7 +222,6 @@ def task_callback(ml_model_metadata,
 
             # If a model was manually selected, skip automatic selection
             if chosen_model:
-                print(f"[INFO] Using manually selected model: {chosen_model}")
 
                 # If user passed a full path to an .onnx, use it directly
                 onnx_path = None
@@ -183,7 +260,6 @@ def task_callback(ml_model_metadata,
         # Build strictly goal-scoped allowed list (names only)
         goal_models = get_models_for_problem(goal)   # [(model_name, downloads), ...]
         allowed_names = [name for (name, _) in goal_models]
-        print(f"[INFO] {len(allowed_names)} candidates for goal '{goal}'")
         if not allowed_names:
             raise Exception("No candidates in graph for the selected goal")
 
@@ -216,7 +292,6 @@ def task_callback(ml_model_metadata,
 
             # Final safety: ensure candidate really belongs to goal
             if not _model_has_goal(neo4j_driver, candidate, goal):
-                print(f"[GUARD] Dropping {candidate}: not linked to goal {goal}")
                 restrained_models.append(candidate)
                 continue
 
@@ -255,6 +330,39 @@ def configuration_callback(req, res):
     res.node_id(req.node_id())
     res.transaction_id(req.transaction_id())
 
+    # HF search (metadata-only browsing; no evaluation)
+    if raw.lower().startswith("hf_search"):
+        # Expected: "hf_search, <description>, <limit>"
+        rest = raw[len("hf_search"):].lstrip()
+        if rest.startswith(","):
+            rest = rest[1:].lstrip()
+
+        # Split from the RIGHT so commas inside description are allowed
+        description = rest
+        limit = 20
+
+        if "," in rest:
+            desc_part, limit_part = rest.rsplit(",", 1)
+            description = desc_part.strip()
+            try:
+                limit = int(limit_part.strip())
+            except Exception:
+                limit = 20
+        else:
+            description = rest.strip()
+
+        try:
+            resp = _mcp_call("search_models", {"description": description, "limit": limit})
+            res.success(True)
+            res.err_code(0)
+            res.configuration(json.dumps(resp))
+            return
+        except Exception as e:
+            res.success(False)
+            res.err_code(1)
+            res.configuration(json.dumps({"models": [], "error": str(e)}))
+            return
+
     # Only handle the listing endpoint(s)
     if raw.lower().startswith("model_from_goal"):
         # Accept both forms:
@@ -289,7 +397,6 @@ def configuration_callback(req, res):
                     names = [f[:-5] for f in listdir(vendored) if f.endswith(".onnx")]
 
                 csv = ", ".join(sorted(names))
-                print(f"[ML_MODEL_PROVIDER] U-NET returning {len(names)} items")
                 res.success(True)
                 res.err_code(0)
                 res.configuration(json.dumps({"models": csv}))
@@ -306,7 +413,6 @@ def configuration_callback(req, res):
             models = get_models_for_problem(goal)  # [(name, downloads)]
             names = [m for (m, _) in models]
             csv = ", ".join(sorted(names))
-            print(f"[ML_MODEL_PROVIDER] Neo4j listing: goal='{goal}', count={len(names)}")
             res.success(bool(names))
             res.err_code(0 if names else 1)
             res.configuration(json.dumps({"models": csv}))
