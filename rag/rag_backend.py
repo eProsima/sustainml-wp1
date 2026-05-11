@@ -48,22 +48,6 @@ print(f"[RAG] ANN index loaded from: {_ann_path}", flush=True)
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 sentence_model = SentenceTransformer('BAAI/bge-large-en', device=device)
 
-"""
-# When there is no allowed_models list. Additional condition needed in generate_natural_answer().
-# Take it from the previous version/commit. Include Client and GraphDatabase.
-# Neo4j Configuration
-NEO4J_URI = "bolt://localhost:7687"
-NEO4J_USER = "neo4j"
-NEO4J_PASSWORD = "12345678"
-
-MODEL = "mistral-small"
-
-# Connect to Neo4j
-neo4j_driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
-
-client = Client(host='http://localhost:11434')
-"""
-
 # Load metadata & encoder
 with open(os.path.join(BASE_DIR, 'model_metadata.json'), 'r') as f:
     metadata = json.load(f)
