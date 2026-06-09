@@ -1,4 +1,4 @@
-# Copyright 2023 SustainML Consortium
+# Copyright 2026 SustainML Consortium
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -340,17 +340,26 @@ def configuration_callback(req, res):
         else:
             description = rest.strip()
 
-        try:
-            resp = _mcp_call("search_models", {"description": description, "limit": limit})
-            res.success(True)
-            res.err_code(0)
-            res.configuration(json.dumps(resp))
-            return
-        except Exception as e:
-            res.success(False)
-            res.err_code(1)
-            res.configuration(json.dumps({"models": [], "error": str(e)}))
-            return
+        last_exc = None
+        for attempt in range(3):
+            try:
+                resp = _mcp_call("search_models", {"description": description, "limit": limit})
+                res.success(True)
+                res.err_code(0)
+                res.configuration(json.dumps(resp))
+                return
+            except Exception as e:
+                last_exc = e
+                err_msg = str(e) or type(e).__name__
+                print(f"[hf_search] attempt {attempt + 1}/3 failed: {err_msg}", flush=True)
+                if attempt < 2:
+                    import time as _time
+                    _time.sleep(1)
+        err_msg = str(last_exc) or type(last_exc).__name__
+        res.success(False)
+        res.err_code(1)
+        res.configuration(json.dumps({"models": [], "error": err_msg}))
+        return
 
     # Only handle the listing endpoint(s)
     if raw.lower().startswith("model_from_goal"):

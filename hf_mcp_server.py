@@ -582,8 +582,9 @@ def hf_search_models(
         return {"models": top, "task": task, "pipeline_tag": pipeline_tag, "candidates": len(cards)}
 
     except Exception as e:
-        _log(f"[hf_search_models][ERROR] {e}")
-        return {"models": [], "error": str(e)}
+        import traceback as _tb
+        _log(f"[hf_search_models][ERROR] {type(e).__name__}: {e}\n{_tb.format_exc()}")
+        return {"models": [], "error": str(e) or type(e).__name__}
 
 
 if __name__ == "__main__":
