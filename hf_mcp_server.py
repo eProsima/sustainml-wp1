@@ -89,7 +89,6 @@ def _load_emb_cache() -> None:
                 except Exception:
                     continue
 
-        _log(f"[cache] loaded {len(_emb_cache)} embeddings from {_CACHE_FILE}")
     except Exception as e:
         _emb_cache = {}
         _log(f"[cache][WARN] failed to load cache: {e}")
@@ -320,8 +319,6 @@ def _semantic_rerank(query: str, cards: List[Dict[str, Any]], top_k: int) -> Lis
 
     mv = np.vstack(mv) if mv else np.zeros((0, qv.shape[0]), dtype=np.float32)
 
-    _log(f"[cache] embed miss={miss} hit={len(cards)-miss} total={len(cards)}")
-
     scores = (mv @ qv).tolist()
 
     for c, s in zip(cards, scores):
@@ -356,12 +353,6 @@ def _extract_from_tags(tags: List[str]) -> Dict[str, List[str]]:
             out["datasets"].append(s.split(":", 1)[1])
         elif sl.startswith("base_model:"):
             out["base_model"].append(s.split(":", 1)[1])
-        # Very common language tags are two-letter codes; a safe small hardcoded allowlist
-        """
-        else:
-            if sl in {"en","fr","de","es","it","pt","ja","ko","zh","ar","ru","nl","pl","tr","uk","vi","fa","el","he","hi","id","cs","ro"}:
-                out["languages"].append(sl)
-        """
 
     # Dedupe while preserving order
     for k in out:
@@ -483,7 +474,6 @@ def hf_search_models(
     # HOVER MODE: fetch only config.json for ONE model
     if description.startswith("__MODEL_CONFIG__:"):
         model_id = description.split(":", 1)[1].strip()
-        _log(f"[hf_search_models][CONFIG] request model_id={model_id}")
 
         if not model_id:
             return {"model_id": "", "tooltip": ""}
@@ -491,7 +481,6 @@ def hf_search_models(
         try:
             cfg = _read_repo_json(model_id, "config.json")
             tooltip = _tooltip_from_config(cfg)
-            _log(f"[hf_search_models][CONFIG] OK model_id={model_id} tooltip_len={len(tooltip)}")
             return {"model_id": model_id, "tooltip": tooltip}
         except Exception as e:
             msg = str(e)
@@ -562,8 +551,6 @@ def hf_search_models(
                 seen.add(mid)
                 cards.append(c)
 
-        _log(f"[hf_search_models] candidates fetched: {len(cards)} (downloads+likes+fresh merged), each={third}")
-
         top, miss = _semantic_rerank(task_query, cards, top_k=limit)
 
         # Enrich TOP results with practical tooltip (model card)
@@ -595,8 +582,9 @@ def hf_search_models(
         return {"models": top, "task": task, "pipeline_tag": pipeline_tag, "candidates": len(cards)}
 
     except Exception as e:
-        _log(f"[hf_search_models][ERROR] {e}")
-        return {"models": [], "error": str(e)}
+        import traceback as _tb
+        _log(f"[hf_search_models][ERROR] {type(e).__name__}: {e}\n{_tb.format_exc()}")
+        return {"models": [], "error": str(e) or type(e).__name__}
 
 
 if __name__ == "__main__":

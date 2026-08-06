@@ -1,4 +1,4 @@
-# Copyright 2023 SustainML Consortium
+# Copyright 2026 SustainML Consortium
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -39,9 +39,7 @@ from sustainml_py.nodes.MLModelNode import MLModelNode
 from fastmcp import Client
 
 
-MCP_SERVER_SCRIPT = os.path.abspath(os.path.expanduser(
-    "~/SustainML/SustainML_ws/src/sustainml_lib/sustainml_modules/sustainml_modules/sustainml-wp1/hf_mcp_server.py"
-))
+MCP_SERVER_SCRIPT = os.path.abspath(os.path.join(os.path.dirname(__file__), "hf_mcp_server.py"))
 
 _mcp_loop = None
 _mcp_thread = None
@@ -198,9 +196,6 @@ def task_callback(ml_model_metadata,
 
     try:
         chosen_model = None
-        # Model restriction after various outputs
-        restrained_models = []
-        type = None
         extra_data_bytes = ml_model_metadata.extra_data()
         if extra_data_bytes:
             extra_data_str = ''.join(chr(b) for b in extra_data_bytes)
@@ -209,12 +204,6 @@ def task_callback(ml_model_metadata,
             except json.JSONDecodeError:
                 print("[WARN] In model_provider node extra_data JSON is not valid.")
                 extra_data_dict = {}
-
-            if "type" in extra_data_dict:
-                type = extra_data_dict["type"]
-
-            if "model_restrains" in extra_data_dict:
-                restrained_models = extra_data_dict["model_restrains"]
 
             if "model_selected" in extra_data_dict:
                 chosen_model = extra_data_dict["model_selected"]
@@ -351,17 +340,26 @@ def configuration_callback(req, res):
         else:
             description = rest.strip()
 
-        try:
-            resp = _mcp_call("search_models", {"description": description, "limit": limit})
-            res.success(True)
-            res.err_code(0)
-            res.configuration(json.dumps(resp))
-            return
-        except Exception as e:
-            res.success(False)
-            res.err_code(1)
-            res.configuration(json.dumps({"models": [], "error": str(e)}))
-            return
+        last_exc = None
+        for attempt in range(3):
+            try:
+                resp = _mcp_call("search_models", {"description": description, "limit": limit})
+                res.success(True)
+                res.err_code(0)
+                res.configuration(json.dumps(resp))
+                return
+            except Exception as e:
+                last_exc = e
+                err_msg = str(e) or type(e).__name__
+                print(f"[hf_search] attempt {attempt + 1}/3 failed: {err_msg}", flush=True)
+                if attempt < 2:
+                    import time as _time
+                    _time.sleep(1)
+        err_msg = str(last_exc) or type(last_exc).__name__
+        res.success(False)
+        res.err_code(1)
+        res.configuration(json.dumps({"models": [], "error": err_msg}))
+        return
 
     # Only handle the listing endpoint(s)
     if raw.lower().startswith("model_from_goal"):
@@ -379,7 +377,7 @@ def configuration_callback(req, res):
 
         fam_l = (family or "").lower()
         hw_l  = (hw or "").lower()
-        is_cnn  = fam_l.lower() == "cnns"
+        is_cnn  = fam_l == "cnns"
         is_fpga = "fpga" in hw_l
 
         # U-Net fast path: allow sentinel goals like U_NET_MODELS or any goal when (FPGA+CNNs)

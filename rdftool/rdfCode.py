@@ -109,10 +109,8 @@ def load_graph():
         with neo4j_driver.session() as session:
             result = session.run("MATCH (n) RETURN count(n) as node_count LIMIT 1")
             count = result.single()["node_count"]
-            # print(f"Neo4j connected successfully. Total nodes: {count}")
         return True
     except Exception as e:
-        # print(f"Error connecting to Neo4j: {e}")
         return False
 
 def execute_cypher_query(cypher_query):
@@ -122,7 +120,6 @@ def execute_cypher_query(cypher_query):
     with neo4j_driver.session() as session:
         results = session.run(cypher_query)
         data = [dict(record) for record in results]
-        print(f"Retrieved {len(data)} records from Neo4j")
         return data
 
 def get_cover_tags():
