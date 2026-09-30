@@ -13,22 +13,29 @@
 # limitations under the License.
 """SustainML MCP Server Implementation."""
 
+import os
+
+# Silence banners/logspam - must run before fastmcp/huggingface_hub are imported
+# below, since huggingface_hub reads HF_HUB_DISABLE_PROGRESS_BARS once at import
+# time; setting it any later has no effect on its tqdm progress bars.
+os.environ.setdefault("FASTMCP_NO_BANNER", "1")
+os.environ.setdefault("FASTMCP_LOG_LEVEL", "ERROR")
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+
 import json
 import numpy as np
-import os
 import pathlib
 import sys
 import traceback
 import urllib.request
+import warnings
 
 from typing import Any, Dict, List, Optional
 from fastmcp import FastMCP
 from sentence_transformers import SentenceTransformer
 from huggingface_hub import HfApi, hf_hub_download
 
-# Silence banners/logspam
-os.environ.setdefault("FASTMCP_NO_BANNER", "1")
-os.environ.setdefault("FASTMCP_LOG_LEVEL", "ERROR")
+warnings.filterwarnings("ignore", message="The pynvml package is deprecated.*", category=FutureWarning)
 
 mcp = FastMCP("SustainML Hugging Face Hub MCP")
 api = HfApi()
@@ -104,7 +111,6 @@ def _save_emb_cache() -> None:
         with open(_CACHE_FILE, "a", encoding="utf-8") as f:
             for rec in _new_cache_entries:
                 f.write(json.dumps(rec) + "\n")
-        _log(f"[cache] appended {len(_new_cache_entries)} embeddings to {_CACHE_FILE}")
         _new_cache_entries = []
     except Exception as e:
         _log(f"[cache][WARN] failed to append cache: {e}")
