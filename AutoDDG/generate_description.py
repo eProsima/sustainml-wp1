@@ -29,8 +29,12 @@ class DatasetDescriptionGenerator:
             :param response_text: The response text to fix.
             :return: The fixed response text.
             """
-            response_text = re.search(r'\{.*\}', response_text, re.DOTALL).group()
-            
+            match = re.search(r'\{.*\}', response_text, re.DOTALL)
+            if match is None:
+                raise ValueError(
+                    f"LLM response contained no JSON object to extract: {response_text!r}")
+            response_text = match.group()
+
             # Append the required number of closing braces
             open_braces = response_text.count('{')
             close_braces = response_text.count('}')
@@ -39,8 +43,8 @@ class DatasetDescriptionGenerator:
             # Use regex to remove any trailing comma before the final closing brace
             response_text = re.sub(r',\s*}', '}', response_text)
             return response_text
-    
-    def _generate_prompt(self, dataset_sample, 
+
+    def _generate_prompt(self, dataset_sample,
                          dataset_profile=None, use_profile=False,
                          semantic_profile=None, use_semantic_profile=False,
                          data_topic=None, use_topic=False):
@@ -61,8 +65,8 @@ class DatasetDescriptionGenerator:
         "description": "A brief description of the dataset, including its purpose, content, and any relevant context.",
         "profile": "A detailed profile of the dataset in natural sentences, including its structure, data types, and any relevant metadata.",
         "topic": "A concise topic that best describes the dataset's primary theme, ideally in 2-3 words.",
-        "keywords": "A list of relevant keywords that can be used for indexing and search purposes.",
-        "applications": "A description of potential applications or use cases for the dataset, highlighting its relevance to specific domains or industries, in list format."
+        "keywords": ["keyword1", "keyword2", "keyword3"],
+        "applications": ["application 1 use case", "application 2 use case"]
         }
         """
         prompt = f"Answer the question using the following information.\n"
@@ -97,6 +101,7 @@ class DatasetDescriptionGenerator:
         prompt += (
             f"Question: Based on the information above and the requirements, provide a dataset metadata in json format."
             f"Use only metadata information, formatting in json. Only return the json, nothing else."
+            f"\"keywords\" and \"applications\" must be JSON arrays of strings (e.g. [\"a\", \"b\"]), never a single string."
             f"For the json use the following template {template}\n\n"
         )
 
@@ -180,8 +185,12 @@ class SemanticProfiler:
             :param response_text: The response text to fix.
             :return: The fixed response text.
             """
-            response_text = re.search(r'\{.*\}', response_text, re.DOTALL).group()
-            
+            match = re.search(r'\{.*\}', response_text, re.DOTALL)
+            if match is None:
+                raise ValueError(
+                    f"LLM response contained no JSON object to extract: {response_text!r}")
+            response_text = match.group()
+
             # Append the required number of closing braces
             open_braces = response_text.count('{')
             close_braces = response_text.count('}')
@@ -190,7 +199,7 @@ class SemanticProfiler:
             # Use regex to remove any trailing comma before the final closing brace
             response_text = re.sub(r',\s*}', '}', response_text)
             return response_text
-    
+
     def get_semantic_type(self, column_name, sample_values):
         prompt = f"""
         You are a dataset semantic analyzer. Based on the column name and sample values, classify the column into multiple semantic types. 
@@ -223,12 +232,11 @@ class SemanticProfiler:
         
         response_text = response['message']['content']
 
-        response_text = self._fix_json_response(response_text)
-
         try:
+            response_text = self._fix_json_response(response_text)
             semantic_dict = json.loads(response_text)
-        except json.JSONDecodeError:
-            print(f"Failed to parse GPT response as JSON for column: {column_name}")
+        except ValueError as e:
+            print(f"Failed to parse GPT response as JSON for column: {column_name}: {e}")
             print(f"Response text: {response_text}")
             semantic_dict = None
         print(f"Semantic analysis for column '{column_name}': {semantic_dict}")
