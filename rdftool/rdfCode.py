@@ -18,7 +18,6 @@ WHITELIST = {
         "ARTeLab/mbart-summarization-mlsum",
         "Ameer05/bart-large-cnn-samsum-rescom-finetuned-resume-summarizer-10-epoch-tweak-lr-8-100-1",
         "BEE-spoke-data/pegasus-x-base-synthsumm_open-16k",
-        "DunnBC22/pegasus-multi_news-NewsSummarization_BBC",
         "ELiRF/NASES",
         "EbanLee/kobart-summary-v3",
         "Einmalumdiewelt/PegasusXSUM_GNAD",
@@ -38,7 +37,6 @@ WHITELIST = {
         "z-dickson/bart-large-cnn-climate-change-summarization",
     ]),
     "translation": frozenset([
-        "AI-Sweden-Models/gpt-sw3-6.7b-v2-translator",
         "Abdulmohsena/Faseeh",
         "Babelscape/mrebel-base",
         "Babelscape/mrebel-large",
@@ -51,7 +49,6 @@ WHITELIST = {
         "CLAck/en-vi",
         "CLAck/indo-mixed",
         "DevWorld/Gemago-2b",
-        "DunnBC22/opus-mt-zh-en-Chinese_to_English",
         "HPLT/translate-en-ar-v1.0-hplt",
         "HPLT/translate-en-hr-v1.0-hplt_opus",
         "HackerMonica/nllb-200-distilled-600M-en-zh_CN",
