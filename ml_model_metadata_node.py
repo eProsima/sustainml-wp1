@@ -22,11 +22,7 @@ import time
 import json
 import pandas as pd
 
-from rdftool.rdfCode import (
-    load_graph, get_problems, get_cover_tags, search_metrics_by_modalities, get_models_for_problem, get_models_for_problem_and_tag,
-    find_metrics_by_model, get_model_details, get_problems_for_cover_tag, get_all_metrics, get_modalities_input,
-    get_modalities_output, search_metrics_by_cover_tag
-)
+from rdftool.rdfCode import load_graph, get_problems, get_model_details
 
 from AutoDDG.generate_description import SemanticProfiler, DatasetDescriptionGenerator
 from AutoDDG.utils import get_sample, json_to_dataframe
@@ -199,8 +195,6 @@ def task_callback(user_input, node_status, ml_model_metadata):
         f"Answer with only one of the Machine learning goals and nothing more, just the goal name without \"\" or ''. "
         f"If you are not sure, answer with 'None'."
     )
-    if (user_input.modality() != ""):
-        prompt = f"{prompt} Using the modality {user_input.modality()}."
     if (user_input.inputs()):
         prompt = f"{prompt} The user inputs known are {', '.join(user_input.inputs())}."
     if (user_input.outputs()):
@@ -247,32 +241,12 @@ def task_callback(user_input, node_status, ml_model_metadata):
 def configuration_callback(req, res):
 
     # Callback for configuration implementation here
+    # The GUI requests the list of goals with "modality" (the modalities are no longer used)
     if req.configuration() == "modality":
         res.node_id(req.node_id())
         res.transaction_id(req.transaction_id())
         try:
             # Retrieve Possible Ml Goals from graph
-            raw_modality = get_cover_tags()
-            inputs = [str(m) for m in raw_modality]
-            unsupported_modality = [
-                "audio",
-                "cv",
-                "multimodal",
-                "other",
-                "rl",
-                "tabular"
-            ]
-            supported_modality = [modality for modality in inputs if modality not in unsupported_modality]
-            sorted_modalities = ', '.join(sorted(supported_modality))
-
-            if sorted_modalities == "":
-                res.success(False)
-                res.err_code(1) # 0: No error || 1: Error
-            else:
-                res.success(True)
-                res.err_code(0) # 0: No error || 1: Error
-            # print(f"Available Modalities: {sorted_modalities}") #debug
-
             raw_goals = get_problems()
             inputs = [str(g) for g in raw_goals]
             supported_goals = [goal for goal in inputs if goal not in unsupported_goals]
@@ -286,136 +260,11 @@ def configuration_callback(req, res):
                 res.err_code(0) # 0: No error || 1: Error
             # print(f"Available Goals: {sorted_goals}")   #debug
 
-            # json_str = json.dumps(dict(modalities=sorted_modalities, goals=sorted_goals))
-            # print(len(json_str))    #debug
-
-            res.configuration(json.dumps(dict(modalities=sorted_modalities, goals=sorted_goals)))
+            res.configuration(json.dumps(dict(goals=sorted_goals)))
         except Exception as e:
-            print(f"Error getting goals and modalities from request: {e}")
+            print(f"Error getting goals from request: {e}")
             res.success(False)
             res.err_code(1) # 0: No error || 1: Error
-
-    elif "in_out_modalities" in req.configuration():
-        res.node_id(req.node_id())
-        res.transaction_id(req.transaction_id())
-        try:
-            # Retrieve Possible Ml Inputs and Outputs modalities
-            inputs = get_modalities_input()
-            sorted_inputs = ', '.join(sorted(inputs))
-            outputs = get_modalities_output()
-            sorted_outputs = ', '.join(sorted(outputs))
-
-            if sorted_inputs == "" or sorted_outputs == "":
-                res.success(False)
-                res.err_code(1) # 0: No error || 1: Error
-            else:
-                res.success(True)
-                res.err_code(0) # 0: No error || 1: Error
-            # print(f"Available Input Modalities: {sorted_inputs}") #debug
-            # print(f"Available Output Modalities: {sorted_outputs}") #debug
-
-            res.configuration(json.dumps(dict(inputs=sorted_inputs, outputs=sorted_outputs)))
-
-        except Exception as e:
-            print(f"Error getting inputs and outputs modalities from request: {e}")
-            res.success(False)
-            res.err_code(1) # 0: No error || 1: Error
-
-    elif "metrics" in req.configuration():
-        res.node_id(req.node_id())
-        res.transaction_id(req.transaction_id())
-
-        # Extracts datas for metrics reception
-        config_content = req.configuration()[len("metrics, "):]  # "metrics, <metric_req_type>: <req_type_values>"
-
-        try:
-            metric_req_type, req_type_values = config_content.split(":", 1)
-            metric_req_type = metric_req_type.strip()
-            req_type_values = req_type_values.strip()
-
-            if metric_req_type == "cover_tag":
-                parts = req_type_values.split(',')
-                if len(parts) >= 2:
-                    cover_tag = parts[0].strip()
-                    tag = parts[1].strip()
-                    metrics = search_metrics_by_cover_tag(cover_tag)
-                else:
-                    cover_tag = req_type_values.strip()
-                    metrics = search_metrics_by_cover_tag(cover_tag)
-
-                all_metrics = []
-                for problem, metrics_list in metrics.items():
-                    for model, m in metrics_list.items():
-                        if isinstance(m, list):
-                            for metric in m:
-                                if metric not in all_metrics:
-                                    all_metrics.append(metric)
-                        else:
-                            if m not in all_metrics:
-                                all_metrics.append(m)
-                sorted_metrics = ', '.join(sorted(all_metrics))
-
-            elif metric_req_type == "modality":
-                input_modality, output_modality = req_type_values.split(",", 1)
-                input_modality = input_modality.strip()
-                output_modality = output_modality.strip()
-                metrics = search_metrics_by_modalities(input_modality, output_modality)
-                all_metrics = []
-                for problem, metrics_list in metrics.items():
-                    for model, m in metrics_list.items():
-                        if isinstance(m, list):
-                            for metric in m:
-                                if metric not in all_metrics:
-                                    all_metrics.append(metric)
-                        else:
-                            if m not in all_metrics:
-                                all_metrics.append(m)
-                sorted_metrics = ', '.join(sorted(all_metrics))
-
-            elif metric_req_type == "problem":
-                parts = req_type_values.split(',')
-                if len(parts) >= 2:
-                    problem_name = parts[0].strip()
-                    tag = parts[1].strip()
-                    models = get_models_for_problem_and_tag(problem_name, tag)
-                else:
-                    problem_name = req_type_values.strip()
-                    models = get_models_for_problem(problem_name)
-
-                  # Pass problem name and tag
-                all_metrics = []
-
-                for model,downloads in models:
-                    metrics = find_metrics_by_model(model)
-                    if isinstance(metrics, list):
-                        all_metrics.extend(metrics)
-                    else:
-                        all_metrics.append(metrics)
-
-                sorted_metrics = ', '.join(sorted(all_metrics))
-
-            elif metric_req_type == "all":
-                metrics = get_all_metrics()
-                sorted_metrics = ', '.join(sorted(metrics))
-
-            else:
-                res.success(False)
-                res.err_code(1) # 0: No error || 1: Error
-
-        except Exception as e:
-            print(f"Error getting metrics from request: {e}")
-            res.success(False)
-            res.err_code(1) # 0: No error || 1: Error
-
-        if sorted_metrics == "":
-            res.success(False)
-            res.err_code(1) # 0: No error || 1: Error
-        else:
-            res.success(True)
-            res.err_code(0) # 0: No error || 1: Error
-        # print(f"Available Metrics: {sorted_metrics}")   #debug
-
-        res.configuration(json.dumps(dict(metrics=sorted_metrics)))
 
     elif 'mode_info' in req.configuration():
         res.node_id(req.node_id())
@@ -436,30 +285,6 @@ def configuration_callback(req, res):
             res.configuration(json.dumps(details))
         except Exception as e:
             print(f"Error getting model details from request: {e}")
-            res.success(False)
-            res.err_code(1)
-
-    elif 'problem_from_modality' in req.configuration():
-        res.node_id(req.node_id())
-        res.transaction_id(req.transaction_id())
-
-        try:
-            modality = req.configuration()[len("problem_from_modality, "):]
-            goals = get_problems_for_cover_tag(modality)
-            sorted_goals = ', '.join(sorted(goals))
-
-            if not sorted_goals:
-                res.success(False)
-                res.err_code(1)  # 0: No error || 1: Error
-            else:
-                res.success(True)
-                res.err_code(0)  # 0: No error || 1: Error
-
-            # print(f"Problems for {modality}: {goals}")  #debug
-            res.configuration(json.dumps(dict(goals=sorted_goals)))
-
-        except Exception as e:
-            print(f"Error getting problems for the modality from request: {e}")
             res.success(False)
             res.err_code(1)
 
