@@ -199,9 +199,13 @@ def task_callback(user_input, node_status, ml_model_metadata):
         prompt = f"{prompt} The user inputs known are {', '.join(user_input.inputs())}."
     if (user_input.outputs()):
         prompt = f"{prompt} The user outputs known are {', '.join(user_input.outputs())}."
-    if isinstance(user_input.minimum_samples(), int) and user_input.minimum_samples() > 0:
+    # The problem definition form leaves these at 1 when the user never touched them (its
+    # "unspecified" sentinel, not 0) - so only inject a sample-count hint when it's actually
+    # been set to something else, otherwise setting only one of the two also injects a bogus
+    # "max 1 sample" (or "min 1 sample") constraint for the one left untouched.
+    if isinstance(user_input.minimum_samples(), int) and user_input.minimum_samples() > 1:
         prompt = f"{prompt} Have into account that needs to have {user_input.minimum_samples()} minimum samples."
-    if isinstance(user_input.maximum_samples(), int) and user_input.maximum_samples() > 0:
+    if isinstance(user_input.maximum_samples(), int) and user_input.maximum_samples() > 1:
         prompt = f"{prompt} Have into account that needs to have {user_input.maximum_samples()} maximum samples."
     if dataset_metadata:
         prompt = f"{prompt} The dataset that must be analyzed with the chosen Goal has the following metadata {json.dumps(dataset_metadata)}."
