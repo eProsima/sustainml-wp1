@@ -20,7 +20,16 @@ import signal
 import threading
 import time
 import json
+import os
+import re
+import sys
 import pandas as pd
+
+WP2_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "sustainml-wp2"))
+if WP2_ROOT not in sys.path:
+    sys.path.insert(0, WP2_ROOT)
+
+import hw_provider_axelera
 
 from rdftool.rdfCode import load_graph, get_problems, get_model_details
 
@@ -106,6 +115,80 @@ def get_llm_response(client, model_version, problem_definition, prompt):
         print(f"Error in getting response from Ollama: {e}")
         return None
 
+# Words a quote must contain to show the need for each criterion
+YOLO_CRITERIA_WORDS = {
+    "accuracy": r"accura|precis|\bmiss|\berror|reliab|\bexact|safety|medical|quality",
+    "speed": r"real[ -]?time|\bfast|\bquick|latency|\bfps\b|frame|\bms\b|millisec|\bspeed|\blive\b|per second",
+    "energy": r"batter|\bpower|energy|\bwatt|efficien|sustainab|consum|carbon|\bgreen",
+}
+
+
+def get_yolo_preferences(client, user_input):
+    """Read, from the problem description, what matters when choosing among the YOLO models of a
+    goal: they all do the same task on the same dataset and only trade accuracy for speed and
+    energy. Returns {"priority", "min_fps", "max_latency_ms", "reason"}, "balanced" and no speed
+    requirement when the description says nothing about it or the LLM does not answer."""
+    text = user_input.problem_short_description()
+    if user_input.problem_definition():
+        text = f"{text}. {user_input.problem_definition()}"
+    if user_input.inputs():
+        text = f"{text}. Inputs: {', '.join(user_input.inputs())}"
+    if user_input.outputs():
+        text = f"{text}. Outputs: {', '.join(user_input.outputs())}"
+    if not text.strip(" ."):
+        return hw_provider_axelera.normalize_preferences(None)
+
+    # One yes/no per criterion, each backed by the exact words of the problem: a small LLM asked
+    # to pick one priority tends to pick the first one offered, and to justify it with words that
+    # are not in the problem
+    prompt = (
+        f"Problem: \"{text}\".\n"
+        "Answer only from the words of the problem above, with a JSON object with these keys:\n"
+        "\"accuracy\": {\"needed\": true or false, \"quote\": \"\"} - true only if the problem says that "
+        "precision or missing nothing is critical;\n"
+        "\"speed\": {\"needed\": true or false, \"quote\": \"\"} - true only if the problem asks for real "
+        "time, low latency, a frame rate or a time limit;\n"
+        "\"energy\": {\"needed\": true or false, \"quote\": \"\"} - true only if the problem mentions "
+        "battery, low power or energy;\n"
+        "\"min_fps\": the total frames per second to process over all streams if the problem states a "
+        "frame rate (e.g. 4 cameras at 30 FPS is 120), else null;\n"
+        "\"max_latency_ms\": the maximum time per image in milliseconds if the problem states one, else null.\n"
+        "Each quote must copy the exact words of the problem that show the need, or be empty when "
+        "needed is false. Most problems state none of these: then all are false."
+    )
+    try:
+        # Temperature 0: every iteration of the problem reads the same requirements, so the
+        # next outputs follow one order of models
+        response = client.chat(model="llama3", format="json", options={"temperature": 0},
+                               messages=[{"role": "user", "content": prompt}])
+        answer = json.loads(response["message"]["content"])
+    except Exception as e:
+        print(f"[ML_MODEL_METADATA] Could not read the YOLO requirements from the description: {e}")
+        return hw_provider_axelera.normalize_preferences(None)
+
+    lowered = " ".join(text.lower().split())
+    needed = []
+    for criterion in ("accuracy", "speed", "energy"):
+        item = answer.get(criterion) if isinstance(answer.get(criterion), dict) else {}
+        quote = " ".join(str(item.get("quote") or "").lower().split()).strip(" .\"'")
+        # The quote must be in the problem and talk about that criterion: the LLM also marks
+        # needs with the words of the task itself ("detect objects in images")
+        if item.get("needed") is True and quote and quote in lowered and \
+                re.search(YOLO_CRITERIA_WORDS[criterion], quote):
+            needed.append((criterion, quote))
+
+    prefs = {"priority": needed[0][0] if len(needed) == 1 else "balanced",
+             "reason": "; ".join(f"{c}: \"{q}\"" for c, q in needed) or "no need stated in the description"}
+    # Numbers only when the problem talks about a frame rate or a time
+    if re.search(r"fps|frames? per second|frame rate|hz\b", lowered):
+        prefs["min_fps"] = answer.get("min_fps")
+    if re.search(r"\d\s*(ms|millisecond|msec|s\b|sec)", lowered):
+        prefs["max_latency_ms"] = answer.get("max_latency_ms")
+    prefs = hw_provider_axelera.normalize_preferences(prefs)
+    print(f"[ML_MODEL_METADATA] YOLO requirements from the description: {prefs}")
+    return prefs
+
+
 # User Callback implementation
 # Inputs: user_input
 # Outputs: node_status, ml_model_metadata
@@ -114,6 +197,8 @@ def task_callback(user_input, node_status, ml_model_metadata):
     print(f"Received Task: {user_input.task_id().problem_id()},{user_input.task_id().iteration_id()}")
     client = Client(host='http://localhost:11434')
     dataset_metadata = {}
+    # CNNs on the Axelera board: the goal is one of the vision tasks of its YOLO models
+    is_yolo = False
 
     try:
         extra_data_bytes = user_input.extra_data()
@@ -134,6 +219,16 @@ def task_callback(user_input, node_status, ml_model_metadata):
 
         if "type" in extra_data_dict and extra_data_dict["type"] != "":
             accumulated_data["type"] = extra_data_dict["type"]
+
+        family = extra_data_dict.get("model_family") or extra_data_dict.get("type") or ""
+        hardware = extra_data_dict.get("hardware_required") or ""
+        if hardware:
+            accumulated_data["hardware_required"] = hardware
+        is_yolo = family.strip().lower() == "cnns" and hw_provider_axelera.is_axelera(hardware)
+
+        # The description picks the YOLO model too, whether the goal is chosen in the UI or inferred
+        if is_yolo and not extra_data_dict.get("model_selected"):
+            accumulated_data["yolo_preferences"] = get_yolo_preferences(client, user_input)
 
         problem = user_input.problem_short_description()
         accumulated_data["problem_short_description"] = problem
@@ -180,21 +275,34 @@ def task_callback(user_input, node_status, ml_model_metadata):
     except Exception as e:
         print(f"No extra data was found: {e}")
 
-    # Retrieve Possible ML Goals from graph
+    # Retrieve Possible ML Goals: the vision tasks of the YOLO models for CNNs on the Axelera
+    # board, the graph goals otherwise
     try:
-        raw_goals = get_problems()
-        inputs = [str(g) for g in raw_goals]
-        goals = [goal for goal in inputs if goal not in unsupported_goals]
+        if is_yolo:
+            goal_descriptions = hw_provider_axelera.goal_descriptions()
+            goals = list(goal_descriptions.keys())
+        else:
+            raw_goals = get_problems()
+            inputs = [str(g) for g in raw_goals]
+            goals = [goal for goal in inputs if goal not in unsupported_goals]
     except Exception as e:
         print(f"Error in getting problems from MLModel graph: {e}")
         return
 
     # Select MLGoal Using Ollama llama 3
-    prompt = (
-        f"Which of the following machine learning Goals can be used to solve this problem: {goals}?. "
-        f"Answer with only one of the Machine learning goals and nothing more, just the goal name without \"\" or ''. "
-        f"If you are not sure, answer with 'None'."
-    )
+    if is_yolo:
+        described = "; ".join(f"{g}: {d}" for g, d in goal_descriptions.items())
+        prompt = (
+            f"Which of the following computer vision goals can be used to solve this problem: {described}?. "
+            f"Answer with only one of the goal names ({', '.join(goals)}) and nothing more, without \"\" or ''. "
+            f"If you are not sure, answer with 'None'."
+        )
+    else:
+        prompt = (
+            f"Which of the following machine learning Goals can be used to solve this problem: {goals}?. "
+            f"Answer with only one of the Machine learning goals and nothing more, just the goal name without \"\" or ''. "
+            f"If you are not sure, answer with 'None'."
+        )
     if (user_input.inputs()):
         prompt = f"{prompt} The user inputs known are {', '.join(user_input.inputs())}."
     if (user_input.outputs()):
