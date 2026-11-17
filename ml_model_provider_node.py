@@ -28,6 +28,7 @@ if WP2_ROOT not in sys.path:
     sys.path.insert(0, WP2_ROOT)
 
 import hw_provider_fpga
+import hw_provider_axelera
 
 from rdftool.ModelONNXCodebase import model
 from neo4j import GraphDatabase
@@ -209,6 +210,34 @@ def task_callback(ml_model_metadata,
                 chosen_model = extra_data_dict["model_selected"]
                 print("Model already selected: ", chosen_model)
 
+            # CNNs on the Axelera board: one of its YOLO models, chosen by hand or picked for the goal
+            hardware = hw_constraints.hardware_required()[0] if hw_constraints.hardware_required() else \
+                extra_data_dict.get("hardware_required", "")
+            if (extra_data_dict.get("type") or "").strip().lower() == "cnns" and \
+                    hw_provider_axelera.is_axelera(hardware):
+                if not chosen_model:
+                    goal = ml_model_metadata.ml_model_metadata()[0]
+                    restrained_models = set(extra_data_dict.get("model_restrains") or [])
+                    # What the problem description asks for (accuracy, speed, energy), read by the
+                    # metadata node
+                    preferences = hw_provider_axelera.normalize_preferences(extra_data_dict.get("yolo_preferences"))
+                    ranked = hw_provider_axelera.rank_models(
+                        goal, exclude=restrained_models,
+                        max_memory_mb=float(hw_constraints.max_memory_footprint() or 0),
+                        preferences=preferences)
+                    if not ranked:
+                        raise Exception(f"No YOLO model left for goal '{goal}' on {hardware}")
+                    chosen_model = ranked[0]["name"]
+                    print(f"YOLO model chosen for {goal}: {chosen_model} "
+                          f"({ranked[0]['accuracy']['metric']} {ranked[0]['accuracy']['int8']} after int8), "
+                          f"for the description's requirements {preferences}")
+                elif hw_provider_axelera.get_model(chosen_model) is None:
+                    raise Exception(f"'{chosen_model}' is not a YOLO model of {hardware}")
+                ml_model.model(chosen_model)
+                ml_model.model_path("")
+                ml_model.extra_data(json.dumps({"unsupported_models": unsupported_models}).encode("utf-8"))
+                return
+
             # If a model was manually selected, skip automatic selection
             if chosen_model:
 
@@ -379,6 +408,14 @@ def configuration_callback(req, res):
         hw_l  = (hw or "").lower()
         is_cnn  = fam_l == "cnns"
         is_fpga = "fpga" in hw_l
+
+        # CNNs on the Axelera board: its YOLO models of the goal
+        if is_cnn and hw_provider_axelera.is_axelera(hw):
+            names = [m["name"] for m in hw_provider_axelera.list_models(goal)]
+            res.success(bool(names))
+            res.err_code(0 if names else 1)
+            res.configuration(json.dumps({"models": ", ".join(names)}))
+            return
 
         # U-Net fast path: allow sentinel goals like U_NET_MODELS or any goal when (FPGA+CNNs)
         if (goal.upper() == "U_NET_MODELS") or (is_cnn and is_fpga):
