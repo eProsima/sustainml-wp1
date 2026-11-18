@@ -30,12 +30,9 @@ if WP2_ROOT not in sys.path:
 import hw_provider_fpga
 import hw_provider_axelera
 
-from rdftool.ModelONNXCodebase import model
 from neo4j import GraphDatabase
 from rdftool.rdfCode import load_graph, get_models_for_problem
 from rag.rag_backend import answer_question
-from os.path import isdir, dirname, abspath, join
-from os import listdir
 from sustainml_py.nodes.MLModelNode import MLModelNode
 from fastmcp import Client
 
@@ -112,17 +109,6 @@ def _unet_models_dir():
     )
 
 
-# Lists available U-Net .onnx models from the vendor directory
-def list_unet_onnx_models(basename_only=True):
-    d = _unet_models_dir()
-    if not os.path.isdir(d):
-        print(f"[WARN] U-Net directory not found: {d}")
-        return []
-    names = [f for f in os.listdir(d) if f.endswith(".onnx")]
-    return sorted([os.path.splitext(f)[0] for f in names]) if basename_only else \
-           sorted([os.path.join(d, f) for f in names])
-
-
 # Checks in Neo4j whether a model node is linked to the given goal/problem
 def _model_has_goal(neo4j_driver, model_name: str, goal: str) -> bool:
     cypher = """
@@ -153,7 +139,6 @@ unsupported_models = load_unsupported_models(os.path.dirname(__file__) + "/unsup
 
 # Close the FastMCP client context and reset MCP globals
 def _shutdown_mcp():
-    global _mcp_client_ctx, _mcp_client
     async def _close():
         global _mcp_client_ctx, _mcp_client
         if _mcp_client_ctx is not None:
@@ -256,12 +241,9 @@ def task_callback(ml_model_metadata,
                     elif os.path.isfile(cand2):
                         onnx_path = cand2
 
-                # Else, fall back to graph name -> onnx path resolution
-                if onnx_path is None:
-                    onnx_path = model(chosen_model)
-
+                # Any other model (a Hugging Face one) has no ONNX file
                 ml_model.model(chosen_model)
-                ml_model.model_path(onnx_path)
+                ml_model.model_path(onnx_path or "")
 
                 # Add unsupported_models information to extra_data in JSON format
                 extra_data = {"unsupported_models": unsupported_models}
@@ -320,10 +302,9 @@ def task_callback(ml_model_metadata,
             raise Exception("No suitable model after screening candidates")
         print(f"ML Model chosen: {chosen_model}")
 
-        # Generate model code and keywords
-        onnx_path = model(chosen_model)     # TODO - Further development needed
+        # A model of the graph is a Hugging Face model: it has no ONNX file
         ml_model.model(chosen_model)
-        ml_model.model_path(onnx_path)
+        ml_model.model_path("")
         # Add unsupported_models information to extra_data in json format
         extra_data = {"unsupported_models": unsupported_models}
         encoded_data = json.dumps(extra_data).encode("utf-8")
@@ -382,8 +363,7 @@ def configuration_callback(req, res):
                 err_msg = str(e) or type(e).__name__
                 print(f"[hf_search] attempt {attempt + 1}/3 failed: {err_msg}", flush=True)
                 if attempt < 2:
-                    import time as _time
-                    _time.sleep(1)
+                    time.sleep(1)
         err_msg = str(last_exc) or type(last_exc).__name__
         res.success(False)
         res.err_code(1)
@@ -392,9 +372,7 @@ def configuration_callback(req, res):
 
     # Only handle the listing endpoint(s)
     if raw.lower().startswith("model_from_goal"):
-        # Accept both forms:
-        #   "model_from_goal, <goal>, <hw>, <family>"
-        #   "model_from_goal, model_from_goal, <goal-or-sentinel>, <hw>, <family>" (buggy frontend)
+        # "model_from_goal, <goal-or-sentinel>, <hw>, <family>"
         s = raw.split(",", 1)
         args_str = s[1] if len(s) > 1 else ""          # everything after first comma
         parts = [p.strip() for p in args_str.split(",") if p is not None]
@@ -420,16 +398,10 @@ def configuration_callback(req, res):
         # U-Net fast path: allow sentinel goals like U_NET_MODELS or any goal when (FPGA+CNNs)
         if (goal.upper() == "U_NET_MODELS") or (is_cnn and is_fpga):
             try:
-                try:
-                    vendored = abspath(join(dirname(hw_provider_fpga.__file__),
-                                             "vendor", "sustain_ml_predictor", "unet_models"))
-                except Exception as e:
-                    print(f"[ML_MODEL_PROVIDER] hw_provider_fpga not importable: {e}")
-                    vendored = ""  # fall back to empty
-
+                vendored = _unet_models_dir()
                 names = []
-                if vendored and isdir(vendored):
-                    names = [f[:-5] for f in listdir(vendored) if f.endswith(".onnx")]
+                if os.path.isdir(vendored):
+                    names = [f[:-5] for f in os.listdir(vendored) if f.endswith(".onnx")]
 
                 csv = ", ".join(sorted(names))
                 res.success(True)

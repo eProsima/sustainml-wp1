@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""SustainML Task Encoder Node Implementation."""
+"""SustainML ML Model Metadata Node Implementation."""
 
 from sustainml_py.nodes.MLModelMetadataNode import MLModelMetadataNode
 
@@ -31,7 +31,7 @@ if WP2_ROOT not in sys.path:
 
 import hw_provider_axelera
 
-from rdftool.rdfCode import load_graph, get_problems, get_model_details
+from rdftool.rdfCode import load_graph, get_problems
 
 from AutoDDG.generate_description import SemanticProfiler, DatasetDescriptionGenerator
 from AutoDDG.utils import get_sample, json_to_dataframe
@@ -358,7 +358,7 @@ def configuration_callback(req, res):
             raw_goals = get_problems()
             inputs = [str(g) for g in raw_goals]
             supported_goals = [goal for goal in inputs if goal not in unsupported_goals]
-            sorted_goals = ', '.join(sorted(supported_goals))  # TODO: fix overflow bug sending goals response to request
+            sorted_goals = ', '.join(sorted(supported_goals))
 
             if sorted_goals == "":
                 res.success(False)
@@ -366,35 +366,12 @@ def configuration_callback(req, res):
             else:
                 res.success(True)
                 res.err_code(0) # 0: No error || 1: Error
-            # print(f"Available Goals: {sorted_goals}")   #debug
 
             res.configuration(json.dumps(dict(goals=sorted_goals)))
         except Exception as e:
             print(f"Error getting goals from request: {e}")
             res.success(False)
             res.err_code(1) # 0: No error || 1: Error
-
-    elif 'mode_info' in req.configuration():
-        res.node_id(req.node_id())
-        res.transaction_id(req.transaction_id())
-
-        try:
-            model = req.configuration()[len("mode_info, "):]
-            details = get_model_details(model)
-
-            if not details:
-                res.success(False)
-                res.err_code(1)  # 0: No error || 1: Error
-            else:
-                res.success(True)
-                res.err_code(0)  # 0: No error || 1: Error
-
-            # print(f"Model details for {model}: {details}")  #debug
-            res.configuration(json.dumps(details))
-        except Exception as e:
-            print(f"Error getting model details from request: {e}")
-            res.success(False)
-            res.err_code(1)
 
     elif 'dataset_path' in req.configuration():
         res.node_id(req.node_id())
@@ -403,7 +380,6 @@ def configuration_callback(req, res):
         client = Client(host='http://localhost:11434')
         try:
             dataset_path = req.configuration()[len("dataset_path, "):]
-            # print(f"Dataset path received: {dataset_path}")  #debug
 
             if dataset_path.endswith('.csv'):
                 # Load the CSV file

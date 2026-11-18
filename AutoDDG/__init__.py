@@ -4,6 +4,5 @@
 # arXiv:2502.01050. https://doi.org/10.48550/arXiv.2502.01050
 
 from .generate_description import DatasetDescriptionGenerator, SemanticProfiler
-from .generate_topic import DatasetTopicGenerator
 from .utils import get_sample
 from .data_process import dataset_profiler
