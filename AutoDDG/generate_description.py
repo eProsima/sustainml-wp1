@@ -6,14 +6,38 @@
 import json
 import re
 
+
+def _fix_json_response(response_text):
+    """
+    Automatically close all open braces by counting mismatched '{' and '}' in the response text.
+
+    :param response_text: The response text to fix.
+    :return: The fixed response text.
+    """
+    match = re.search(r'\{.*\}', response_text, re.DOTALL)
+    if match is None:
+        raise ValueError(
+            f"LLM response contained no JSON object to extract: {response_text!r}")
+    response_text = match.group()
+
+    # Append the required number of closing braces
+    open_braces = response_text.count('{')
+    close_braces = response_text.count('}')
+    response_text += '}' * (open_braces - close_braces)
+
+    # Use regex to remove any trailing comma before the final closing brace
+    response_text = re.sub(r',\s*}', '}', response_text)
+    return response_text
+
+
 class DatasetDescriptionGenerator:
     def __init__(self, client, model_name, temperature=0.0, description_words=100):
         """
-        Initializes the DatasetDescriptionGenerator with the OpenAI client and model parameters.
+        Initializes the DatasetDescriptionGenerator with the Ollama client and model parameters.
 
-        :param client: OpenAI client for making requests.
-        :param model: The model to use for generating the description (default: gpt-3.5-turbo-0125).
-        :param temperature: Temperature for controlling randomness in the generation (default: 0.3).
+        :param client: Ollama client for making requests.
+        :param model_name: The model to use for generating the description.
+        :param temperature: Not used: the generation always runs at temperature 0.0.
         :param description_words: Target number of words for the description (default: 100).
         """
         self.client = client  # Use the client instance
@@ -22,41 +46,18 @@ class DatasetDescriptionGenerator:
         self.description_words = description_words
         print(f"Dataset Description Generator initialized with model: {model_name}, temperature: {temperature}, description words: {description_words}")
     
-    def _fix_json_response(self, response_text):
-            """
-            Automatically close all open braces by counting mismatched '{' and '}' in the response text.
-
-            :param response_text: The response text to fix.
-            :return: The fixed response text.
-            """
-            match = re.search(r'\{.*\}', response_text, re.DOTALL)
-            if match is None:
-                raise ValueError(
-                    f"LLM response contained no JSON object to extract: {response_text!r}")
-            response_text = match.group()
-
-            # Append the required number of closing braces
-            open_braces = response_text.count('{')
-            close_braces = response_text.count('}')
-            response_text += '}' * (open_braces - close_braces)
-
-            # Use regex to remove any trailing comma before the final closing brace
-            response_text = re.sub(r',\s*}', '}', response_text)
-            return response_text
-
     def _generate_prompt(self, dataset_sample,
                          dataset_profile=None, use_profile=False,
                          semantic_profile=None, use_semantic_profile=False,
                          data_topic=None, use_topic=False):
         """
-        Generates the prompt for the OpenAI model based on the provided inputs.
+        Generates the prompt for the model based on the provided inputs.
 
         :param dataset_sample: Sample of the dataset to include in the description.
         :param dataset_profile: Optional dataset profile to include in the description.
         :param use_profile: Boolean flag to include the dataset profile.
         :param semantic_profile: Optional semantic types to include in the description.
         :param use_semantic_profile: Boolean flag to include semantic types.
-        :param instruction: Additional instruction for generating the description.
         :return: The generated prompt as a string.
         """
 
@@ -120,7 +121,6 @@ class DatasetDescriptionGenerator:
         :param use_profile: Boolean flag to include the dataset profile in the description.
         :param semantic_profile: Optional semantic types for dataset columns.
         :param use_semantic_profile: Boolean flag to include semantic types in the description.
-        :param instruction: Additional instruction for the description generation.
         :return: Generated description as a string.
         """
         # Create the prompt using the provided parameters
@@ -128,7 +128,7 @@ class DatasetDescriptionGenerator:
                                        semantic_profile, use_semantic_profile,
                                        data_topic, use_topic)
         
-        # Make a request to the OpenAI API to generate the description
+        # Make a request to the model to generate the description
         response = self.client.chat(
             model=self.model,
             messages=[
@@ -138,13 +138,11 @@ class DatasetDescriptionGenerator:
             options={
             "temperature": 0.0
              }
-            #temperature=self.temperature
         )
         
         # Extract the response content
         description = response['message']['content']
-        print(description)
-        description_json = self._fix_json_response(description)
+        description_json = _fix_json_response(description)
         return prompt, description_json
 
 class SemanticProfiler:
@@ -177,28 +175,6 @@ class SemanticProfiler:
         self.client = client  # Use the client instance
         self.model = model_name
         print(f"Semantic Type Analyzer initialized with model: {model_name}")
-
-    def _fix_json_response(self, response_text):
-            """
-            Automatically close all open braces by counting mismatched '{' and '}' in the response text.
-
-            :param response_text: The response text to fix.
-            :return: The fixed response text.
-            """
-            match = re.search(r'\{.*\}', response_text, re.DOTALL)
-            if match is None:
-                raise ValueError(
-                    f"LLM response contained no JSON object to extract: {response_text!r}")
-            response_text = match.group()
-
-            # Append the required number of closing braces
-            open_braces = response_text.count('{')
-            close_braces = response_text.count('}')
-            response_text += '}' * (open_braces - close_braces)
-
-            # Use regex to remove any trailing comma before the final closing brace
-            response_text = re.sub(r',\s*}', '}', response_text)
-            return response_text
 
     def get_semantic_type(self, column_name, sample_values):
         prompt = f"""
@@ -233,7 +209,7 @@ class SemanticProfiler:
         response_text = response['message']['content']
 
         try:
-            response_text = self._fix_json_response(response_text)
+            response_text = _fix_json_response(response_text)
             semantic_dict = json.loads(response_text)
         except ValueError as e:
             print(f"Failed to parse GPT response as JSON for column: {column_name}: {e}")
@@ -276,7 +252,6 @@ class SemanticProfiler:
                 if retry_count == 3:
                     print(f"Failed to get semantic type for column: {column}")
                     continue
-                # print(column, semantic_description)
 
                 # Create a human-readable summary for the column
                 column_summary = f"**{column}**: "
@@ -299,11 +274,6 @@ class SemanticProfiler:
                 function_context = semantic_description.get('Function/Usage Context', 'Unknown')
                 if function_context != '' and function_context != 'Unknown':
                     column_summary += f"Function/Usage context: {function_context.lower()}. "
-
-                # Add sample values
-                # if sample_values:
-                #     sample_str = ', '.join(sample_values)
-                #     column_summary += f"Sample values include {sample_str}."
 
                 # Append the summary for this column
                 semantic_summary.append(column_summary)

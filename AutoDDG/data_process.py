@@ -42,7 +42,6 @@ def dataset_profiler(data_frame):
     semantic_summary = []
     # Temporal coverage (if available)
     if 'temporal_coverage' in metadata:
-        print('temporal_coverage')
         for temp_cov in metadata['temporal_coverage']:
             col_names = ', '.join(temp_cov['column_names'])
             temporal_resolution = temp_cov['temporal_resolution']
@@ -54,7 +53,6 @@ def dataset_profiler(data_frame):
 
     # Spatial coverage (if available)
     if 'spatial_coverage' in metadata:
-        print('spatial_coverage')
         for spatial_cov in metadata['spatial_coverage']:
             col_names = ', '.join(spatial_cov['column_names'])
             spatial_resolution = spatial_cov['type']
