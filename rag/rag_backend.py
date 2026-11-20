@@ -2,7 +2,6 @@ import gdown
 import json
 import os
 import pathlib
-import random
 import torch
 
 from annoy import AnnoyIndex
@@ -74,6 +73,7 @@ def search_semantic(query, allowed_models, top_k=20, sample_k=10):
 
     # Build small in-memory Annoy with ONLY allowed vectors
     sub = AnnoyIndex(ANN_DIM, 'angular')
+    sub.set_seed(42)  # fixed trees, so the same question always gets the same neighbours
     id2name = []
     for new_id, (gid, name) in enumerate(pairs):
         sub.add_item(new_id, annoy_index.get_item_vector(gid))
@@ -97,9 +97,11 @@ def search_semantic(query, allowed_models, top_k=20, sample_k=10):
     if not results:
         return []
 
-    sampled = random.sample(results, min(sample_k, len(results)))
-    print("Allowed-only neighbors:", [x.get("name") for x in sampled])
-    return sampled
+    # Nearest first: the proposal is the allowed model closest to the question, the same one
+    # every time for the same question (the next iterations exclude the models already proposed)
+    nearest = results[:sample_k]
+    print("Allowed-only neighbors:", [x.get("name") for x in nearest])
+    return nearest
 
 
 def generate_natural_answer(knowledge, allowed_models):
